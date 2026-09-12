@@ -60,6 +60,66 @@ const PERMISSION_GROUPS = [
   },
 ];
 
+function PermissionGrid({
+  disabled = false,
+  formPermissions,
+  togglePermission,
+  toggleAllInGroup,
+}: {
+  disabled?: boolean;
+  formPermissions: string[];
+  togglePermission: (perm: string) => void;
+  toggleAllInGroup: (group: (typeof PERMISSION_GROUPS)[number]) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      {PERMISSION_GROUPS.map((group) => {
+        const groupPerms = group.permissions.map((p) => p.value);
+        const selectedCount = groupPerms.filter((p) => formPermissions.includes(p)).length;
+        const allSelected = selectedCount === groupPerms.length;
+        const someSelected = selectedCount > 0 && selectedCount < groupPerms.length;
+
+        return (
+          <div key={group.domain} className="border rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Checkbox
+                checked={allSelected}
+                indeterminate={someSelected}
+                onChange={() => toggleAllInGroup(group)}
+                disabled={disabled}
+              />
+              <h4 className="font-semibold text-gray-900">{group.domain}</h4>
+              <span className="text-sm text-gray-500">
+                ({selectedCount}/{groupPerms.length})
+              </span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pl-6">
+              {group.permissions.map((perm) => (
+                <label
+                  key={perm.value}
+                  className={`flex items-start gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer ${
+                    disabled ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  <Checkbox
+                    checked={formPermissions.includes(perm.value)}
+                    onChange={() => togglePermission(perm.value)}
+                    disabled={disabled}
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{perm.label}</div>
+                    <div className="text-xs text-gray-500">{perm.description}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function PresetsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
@@ -249,54 +309,6 @@ export default function PresetsPage() {
     return <Badge variant="default">Custom</Badge>;
   };
 
-  const PermissionGrid = ({ disabled = false }: { disabled?: boolean }) => (
-    <div className="space-y-6">
-      {PERMISSION_GROUPS.map((group) => {
-        const groupPerms = group.permissions.map((p) => p.value);
-        const selectedCount = groupPerms.filter((p) => formPermissions.includes(p)).length;
-        const allSelected = selectedCount === groupPerms.length;
-        const someSelected = selectedCount > 0 && selectedCount < groupPerms.length;
-
-        return (
-          <div key={group.domain} className="border rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Checkbox
-                checked={allSelected}
-                indeterminate={someSelected}
-                onChange={() => toggleAllInGroup(group)}
-                disabled={disabled}
-              />
-              <h4 className="font-semibold text-gray-900">{group.domain}</h4>
-              <span className="text-sm text-gray-500">
-                ({selectedCount}/{groupPerms.length})
-              </span>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pl-6">
-              {group.permissions.map((perm) => (
-                <label
-                  key={perm.value}
-                  className={`flex items-start gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer ${
-                    disabled ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                >
-                  <Checkbox
-                    checked={formPermissions.includes(perm.value)}
-                    onChange={() => togglePermission(perm.value)}
-                    disabled={disabled}
-                  />
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">{perm.label}</div>
-                    <div className="text-xs text-gray-500">{perm.description}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-
   if (isLoading) {
     return (
       <div className="p-8">
@@ -433,7 +445,11 @@ export default function PresetsPage() {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Permissions
             </label>
-            <PermissionGrid />
+            <PermissionGrid
+              formPermissions={formPermissions}
+              togglePermission={togglePermission}
+              toggleAllInGroup={toggleAllInGroup}
+            />
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t">
@@ -490,7 +506,12 @@ export default function PresetsPage() {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Permissions
             </label>
-            <PermissionGrid disabled={selectedPreset?.isBuiltin} />
+            <PermissionGrid
+              disabled={selectedPreset?.isBuiltin}
+              formPermissions={formPermissions}
+              togglePermission={togglePermission}
+              toggleAllInGroup={toggleAllInGroup}
+            />
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t">

@@ -7,6 +7,56 @@ import { Button, Card, CardContent, Badge, Modal, Select, Checkbox } from '@/com
 import { projectTeamsApi, globalTeamsApi, presetsApi } from '@/lib/api';
 import type { Team, ProjectTeamRole, AssignTeamInput, UpdateTeamPresetsInput, PermissionPreset } from '@/types';
 
+function PresetSelector({
+  presets,
+  selectedPresetIds,
+  togglePreset,
+}: {
+  presets: PermissionPreset[];
+  selectedPresetIds: string[];
+  togglePreset: (presetId: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <label className="block text-sm font-medium text-gray-700">
+        Permission Presets
+      </label>
+      <div className="border rounded-lg divide-y max-h-64 overflow-y-auto">
+        {presets.map((preset) => (
+          <label
+            key={preset.id}
+            className="flex items-start gap-3 p-3 hover:bg-gray-50 cursor-pointer"
+          >
+            <Checkbox
+              checked={selectedPresetIds.includes(preset.id)}
+              onChange={() => togglePreset(preset.id)}
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">{preset.name}</span>
+                {preset.isBuiltin && (
+                  <Badge variant="default" className="text-xs">Built-in</Badge>
+                )}
+              </div>
+              {preset.description && (
+                <p className="text-sm text-gray-500">{preset.description}</p>
+              )}
+              <p className="text-xs text-gray-400 mt-1">
+                {preset.permissions.length} permissions
+              </p>
+            </div>
+          </label>
+        ))}
+      </div>
+      {selectedPresetIds.length > 0 && (
+        <p className="text-sm text-gray-500">
+          {selectedPresetIds.length} preset{selectedPresetIds.length > 1 ? 's' : ''} selected
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function ProjectTeamsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
@@ -195,46 +245,6 @@ export default function ProjectTeamsPage() {
     );
   };
 
-  const PresetSelector = () => (
-    <div className="space-y-2">
-      <label className="block text-sm font-medium text-gray-700">
-        Permission Presets
-      </label>
-      <div className="border rounded-lg divide-y max-h-64 overflow-y-auto">
-        {presets.map((preset) => (
-          <label
-            key={preset.id}
-            className="flex items-start gap-3 p-3 hover:bg-gray-50 cursor-pointer"
-          >
-            <Checkbox
-              checked={selectedPresetIds.includes(preset.id)}
-              onChange={() => togglePreset(preset.id)}
-            />
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-900">{preset.name}</span>
-                {preset.isBuiltin && (
-                  <Badge variant="default" className="text-xs">Built-in</Badge>
-                )}
-              </div>
-              {preset.description && (
-                <p className="text-sm text-gray-500">{preset.description}</p>
-              )}
-              <p className="text-xs text-gray-400 mt-1">
-                {preset.permissions.length} permissions
-              </p>
-            </div>
-          </label>
-        ))}
-      </div>
-      {selectedPresetIds.length > 0 && (
-        <p className="text-sm text-gray-500">
-          {selectedPresetIds.length} preset{selectedPresetIds.length > 1 ? 's' : ''} selected
-        </p>
-      )}
-    </div>
-  );
-
   if (isLoading) {
     return (
       <div className="p-8">
@@ -368,7 +378,11 @@ export default function ProjectTeamsPage() {
                 ]}
               />
 
-              <PresetSelector />
+              <PresetSelector
+                presets={presets}
+                selectedPresetIds={selectedPresetIds}
+                togglePreset={togglePreset}
+              />
             </>
           )}
 
@@ -402,7 +416,11 @@ export default function ProjectTeamsPage() {
             </div>
           )}
 
-          <PresetSelector />
+          <PresetSelector
+            presets={presets}
+            selectedPresetIds={selectedPresetIds}
+            togglePreset={togglePreset}
+          />
 
           <div className="flex justify-end gap-3 pt-4">
             <Button variant="secondary" onClick={() => setShowEditModal(false)}>

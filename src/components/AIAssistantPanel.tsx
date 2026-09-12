@@ -78,7 +78,7 @@ export function AIAssistantPanel({
           <div className="text-center text-gray-500 text-sm mt-8">
             <p>How can I help you create a route?</p>
             <p className="mt-2 text-xs">
-              Try: "Route /api/users to user-service on port 8080"
+              Try: &quot;Route /api/users to user-service on port 8080&quot;
             </p>
           </div>
         )}

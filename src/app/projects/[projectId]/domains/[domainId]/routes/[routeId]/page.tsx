@@ -1904,7 +1904,7 @@ export default function RouteDetailPage() {
                 <div className="p-4 bg-primary-50 border border-primary-200 rounded-lg">
                   <h4 className="text-sm font-medium text-primary-800 mb-1">Envoy Extensions</h4>
                   <p className="text-xs text-primary-600">
-                    Custom Lua scripts, WebAssembly (Wasm) modules, or external processing (ext-proc) services that extend Envoy's request/response processing.
+                    Custom Lua scripts, WebAssembly (Wasm) modules, or external processing (ext-proc) services that extend Envoy&apos;s request/response processing.
                   </p>
                 </div>
 
