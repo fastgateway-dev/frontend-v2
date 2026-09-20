@@ -152,4 +152,14 @@ export const domainsApi = {
     );
     return response.data;
   },
+
+  attachCertificate: async (projectId: string, domainId: string, certificateId: string): Promise<Domain> => {
+    const response = await apiClient.put<Domain>(`/projects/${projectId}/domains/${domainId}/certificate`, { certificateId });
+    return response.data;
+  },
+
+  detachCertificate: async (projectId: string, domainId: string): Promise<Domain> => {
+    const response = await apiClient.delete<Domain>(`/projects/${projectId}/domains/${domainId}/certificate`);
+    return response.data;
+  },
 };

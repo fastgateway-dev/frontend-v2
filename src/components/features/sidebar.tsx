@@ -20,12 +20,17 @@ import {
   KeyRound,
   BookOpen,
   Network,
+  Stamp,
+  Cloud,
+  FileKey,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { NotificationBell } from '@/components/features/notification-bell';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissionsStore } from '@/stores/permissions';
 import { projectsApi } from '@/lib/api';
+import { hasCertPerm } from '@/lib/utils/certificates';
 
 interface SidebarProps {
   projectId?: string;
@@ -75,6 +80,9 @@ export function Sidebar({ projectId }: SidebarProps) {
         { href: '/users', icon: Users2, label: 'Users' },
         { href: '/teams', icon: Users, label: 'Teams' },
         { href: '/sso', icon: Shield, label: 'SSO' },
+        { href: '/certificates', icon: ShieldCheck, label: 'All Certificates' },
+        { href: '/certificate-issuers', icon: Stamp, label: 'Certificate Issuers' },
+        { href: '/dns-credentials', icon: Cloud, label: 'DNS Credentials' },
         { href: '/settings', icon: Settings, label: 'Settings' },
       ]
     : [];
@@ -93,6 +101,11 @@ export function Sidebar({ projectId }: SidebarProps) {
     // resourcesNavItems.push({ href: `/projects/${projectId}/topology`, icon: Network, label: 'Topology' });
     // Domains - visible to all team members
     resourcesNavItems.push({ href: `/projects/${projectId}/domains`, icon: Globe, label: 'Domains' });
+
+    // Certificates - only for members with certificate.view permission
+    if (hasCertPerm(permissions, 'certificate.view')) {
+      resourcesNavItems.push({ href: `/projects/${projectId}/certificates`, icon: FileKey, label: 'Certificates' });
+    }
 
     // Domain Templates - only for Owner/Project Admin
     if (permissions.canManageDomainTemplates) {

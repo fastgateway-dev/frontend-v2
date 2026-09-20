@@ -4,12 +4,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, Route as RouteIcon, Rocket, Info, Search, Shield } from 'lucide-react';
-import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent, Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui';
-import { domainsApi, routesApi, permissionsApi, projectsApi } from '@/lib/api';
+import { Button, Card, CardContent, Badge, Select, Tabs, TabsList, TabsTrigger, TabsContent, Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui';
+import { domainsApi, routesApi, permissionsApi, projectsApi, certificatesApi } from '@/lib/api';
 import { MetricsTab } from '@/components/metrics/MetricsTab';
 import { NewRouteModal } from '@/components/NewRouteModal';
 import { aiApi } from '@/lib/api/ai';
-import type { Domain, Route, Project, ProjectPermissions, DomainSettings } from '@/types';
+import { certStatusBadge } from '@/lib/utils/certificates';
+import type { Domain, Route, Project, ProjectPermissions, DomainSettings, EnrichedCertificate } from '@/types';
 
 export default function DomainDetailPage() {
   const params = useParams();
@@ -26,6 +27,13 @@ export default function DomainDetailPage() {
 
   // Domain Settings state
   const [domainSettings, setDomainSettings] = useState<DomainSettings | null>(null);
+
+  // Managed certificate attach/detach state
+  const [certificates, setCertificates] = useState<EnrichedCertificate[]>([]);
+  const [selectedCertificateId, setSelectedCertificateId] = useState('');
+  const [isAttachingCert, setIsAttachingCert] = useState(false);
+  const [isDetachingCert, setIsDetachingCert] = useState(false);
+  const [certActionError, setCertActionError] = useState<string | null>(null);
 
   // YAML manifest state
   const [gatewayYaml, setGatewayYaml] = useState('');
@@ -50,7 +58,7 @@ export default function DomainDetailPage() {
 
   const loadData = async () => {
     try {
-      const [domainData, routesData, permsData, settingsData, yamlsData, aiStatus, projectData] = await Promise.all([
+      const [domainData, routesData, permsData, settingsData, yamlsData, aiStatus, projectData, certificatesData] = await Promise.all([
         domainsApi.get(projectId, domainId),
         routesApi.list(projectId, domainId),
         permissionsApi.getProjectPermissions(projectId),
@@ -58,11 +66,13 @@ export default function DomainDetailPage() {
         domainsApi.getYamls(projectId, domainId).catch(() => null),
         aiApi.getStatus().catch(() => ({ enabled: false })),
         projectsApi.get(projectId).catch(() => null),
+        certificatesApi.list(projectId).catch(() => []),
       ]);
       setDomain(domainData);
       setRoutes(routesData.data);
       setPermissions(permsData);
       setProject(projectData);
+      setCertificates(certificatesData);
       if (settingsData) {
         setDomainSettings(settingsData);
       }
@@ -120,6 +130,47 @@ export default function DomainDetailPage() {
 
   const canDeployRoute = (route: Route) => {
     return route.status === 'approved' || route.status === 'pending_deploy';
+  };
+
+  const attachableCertificates = certificates.filter(
+    (c) => c.usage === 'server' && c.status === 'ready'
+  );
+  const attachedCertificate = domain?.managedCertificateId
+    ? certificates.find((c) => c.id === domain.managedCertificateId) || null
+    : null;
+
+  const handleAttachCertificate = async () => {
+    if (!selectedCertificateId) return;
+    setCertActionError(null);
+    setIsAttachingCert(true);
+    try {
+      const updated = await domainsApi.attachCertificate(projectId, domainId, selectedCertificateId);
+      setDomain(updated);
+      setSelectedCertificateId('');
+    } catch (err: unknown) {
+      const error = err as { response?: { status?: number; data?: { error?: string } } };
+      if (error.response?.status === 422) {
+        setCertActionError(error.response?.data?.error || 'This certificate cannot be attached (wrong usage or not ready).');
+      } else {
+        setCertActionError(error.response?.data?.error || 'Failed to attach certificate.');
+      }
+    } finally {
+      setIsAttachingCert(false);
+    }
+  };
+
+  const handleDetachCertificate = async () => {
+    setCertActionError(null);
+    setIsDetachingCert(true);
+    try {
+      const updated = await domainsApi.detachCertificate(projectId, domainId);
+      setDomain(updated);
+    } catch (err: unknown) {
+      const error = err as { response?: { status?: number; data?: { error?: string } } };
+      setCertActionError(error.response?.data?.error || 'Failed to detach certificate.');
+    } finally {
+      setIsDetachingCert(false);
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -195,6 +246,77 @@ export default function DomainDetailPage() {
         projectId={projectId}
         domainId={domainId}
       />
+
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <h2 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <Shield className="h-4 w-4" />
+            Managed Certificate
+          </h2>
+
+          {attachedCertificate ? (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-900">{attachedCertificate.name}</span>
+                <Badge variant={certStatusBadge(attachedCertificate.status).variant}>
+                  {certStatusBadge(attachedCertificate.status).label}
+                </Badge>
+              </div>
+              {permissions?.canManageDomains && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleDetachCertificate}
+                  disabled={isDetachingCert}
+                >
+                  {isDetachingCert ? 'Detaching...' : 'Detach'}
+                </Button>
+              )}
+            </div>
+          ) : domain?.managedCertificateId ? (
+            <p className="text-sm text-gray-500">
+              A managed certificate is attached (id: {domain.managedCertificateId}), but its details could not be loaded.
+            </p>
+          ) : (
+            <p className="text-sm text-gray-500">
+              No managed certificate attached.
+              {domain?.tlsSecretName
+                ? ' TLS currently falls back to the legacy secret shown above.'
+                : ' TLS has no legacy secret configured either.'}
+            </p>
+          )}
+
+          {permissions?.canManageDomains && !attachedCertificate && (
+            <div className="flex items-end gap-2 mt-3">
+              <div className="flex-1 max-w-sm">
+                <Select
+                  label="Attach a server certificate"
+                  value={selectedCertificateId}
+                  onChange={(e) => {
+                    setSelectedCertificateId(e.target.value);
+                    setCertActionError(null);
+                  }}
+                  options={[
+                    { value: '', label: attachableCertificates.length ? 'Select a certificate...' : 'No ready server certificates available' },
+                    ...attachableCertificates.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                  disabled={attachableCertificates.length === 0}
+                />
+              </div>
+              <Button
+                onClick={handleAttachCertificate}
+                disabled={!selectedCertificateId || isAttachingCert}
+              >
+                {isAttachingCert ? 'Attaching...' : 'Attach'}
+              </Button>
+            </div>
+          )}
+
+          {certActionError && (
+            <p className="mt-2 text-sm text-red-600">{certActionError}</p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="pt-6">
