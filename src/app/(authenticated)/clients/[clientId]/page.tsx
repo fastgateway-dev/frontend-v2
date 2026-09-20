@@ -8,7 +8,7 @@ import { clientAttachmentsApi } from '@/lib/api/client-attachments';
 import { projectsApi } from '@/lib/api/projects';
 import { domainsApi } from '@/lib/api/domains';
 import { routesApi } from '@/lib/api/routes';
-import { Client, ClientIPAddress, ClientHeader, CreateClientHeaderInput, ClientRouteAttachment, AttachmentStatus, Project, Domain, Route as RouteType, GenerateAPIKeyResponse, ConfigureJWTInput, JWTRequiredClaim, RateLimitConfig, ProjectCapabilities, MTLSSANEntry } from '@/types';
+import { Client, ClientIPAddress, ClientHeader, CreateClientHeaderInput, ClientRouteAttachment, AttachmentStatus, Project, Domain, Route as RouteType, GenerateAPIKeyResponse, ConfigureJWTInput, JWTRequiredClaim, RateLimitConfig, ProjectCapabilities, MTLSSANEntry, ManagedCertificate } from '@/types';
 import RateLimitForm from '@/components/RateLimitForm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -100,6 +100,18 @@ export default function ClientDetailPage() {
   const [newMtlsHash, setNewMtlsHash] = useState('');
   const [mtlsError, setMtlsError] = useState<string | null>(null);
   const [isEditingMTLS, setIsEditingMTLS] = useState(false);
+
+  // Managed certificate attach/detach state
+  const [attachableCertificates, setAttachableCertificates] = useState<ManagedCertificate[]>([]);
+  const [loadingAttachableCertificates, setLoadingAttachableCertificates] = useState(false);
+  const [selectedCertificateId, setSelectedCertificateId] = useState('');
+  const [certAttachError, setCertAttachError] = useState<string | null>(null);
+  const [attachingCertificate, setAttachingCertificate] = useState(false);
+  const [detachingCertificate, setDetachingCertificate] = useState(false);
+  // Name of the managed certificate the user just attached — kept locally since the
+  // list of attachable certificates no longer contains it once attached, and resolving
+  // it on a cold load would require a cross-project lookup (id is shown instead).
+  const [attachedCertificateName, setAttachedCertificateName] = useState<string | null>(null);
 
   // IP modals
   const [showAddIPModal, setShowAddIPModal] = useState(false);
@@ -618,6 +630,63 @@ export default function ClientDetailPage() {
       setSubmitting(false);
     }
   };
+
+  // Managed certificate attach/detach handlers
+  const loadAttachableCertificates = async () => {
+    setCertAttachError(null);
+    setLoadingAttachableCertificates(true);
+    try {
+      const data = await clientsApi.listAttachableCertificates(clientId);
+      setAttachableCertificates(data || []);
+    } catch {
+      setAttachableCertificates([]);
+    } finally {
+      setLoadingAttachableCertificates(false);
+    }
+  };
+
+  const handleAttachCertificate = async () => {
+    if (!selectedCertificateId) return;
+    setCertAttachError(null);
+    setAttachingCertificate(true);
+    try {
+      await clientsApi.attachCertificate(clientId, selectedCertificateId);
+      const selected = attachableCertificates.find((c) => c.id === selectedCertificateId);
+      setAttachedCertificateName(selected?.name || null);
+      setSelectedCertificateId('');
+      fetchData();
+    } catch (err: any) {
+      setCertAttachError(err.response?.data?.error || 'Failed to attach certificate');
+    } finally {
+      setAttachingCertificate(false);
+    }
+  };
+
+  const handleDetachCertificate = async () => {
+    setCertAttachError(null);
+    setDetachingCertificate(true);
+    try {
+      await clientsApi.detachCertificate(clientId);
+      setAttachedCertificateName(null);
+      fetchData();
+    } catch (err: any) {
+      setCertAttachError(err.response?.data?.error || 'Failed to detach certificate');
+    } finally {
+      setDetachingCertificate(false);
+    }
+  };
+
+  // Load attachable managed certificates when the mTLS tab is opened and no
+  // managed certificate is currently attached.
+  useEffect(() => {
+    if (activeTab === 'mtls' && client && !client.managedCertificateId) {
+      loadAttachableCertificates();
+      if (projects.length === 0) {
+        loadProjects();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, client?.managedCertificateId, clientId]);
 
   const addMtlsSan = () => {
     setMtlsError(null);
@@ -1324,7 +1393,87 @@ export default function ClientDetailPage() {
 
           {/* mTLS Tab */}
           {activeTab === 'mtls' && (
-            <>
+            <div className="space-y-6">
+              {/* Managed Certificate Identity */}
+              <div className="p-4 border border-gray-200 rounded-lg bg-white">
+                <div className="flex items-center gap-2 mb-3">
+                  <FileText className="h-5 w-5 text-gray-500" />
+                  <h3 className="font-medium text-gray-900">Managed Certificate Identity</h3>
+                </div>
+
+                {certAttachError && (
+                  <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                    {certAttachError}
+                  </div>
+                )}
+
+                {client.managedCertificateId ? (
+                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                    <div>
+                      <p className="text-sm text-gray-500">Managed certificate attached</p>
+                      <p className="text-sm font-medium text-gray-900">
+                        {attachedCertificateName || client.managedCertificateId}
+                      </p>
+                    </div>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={handleDetachCertificate}
+                      disabled={detachingCertificate}
+                    >
+                      <Unlink className="h-4 w-4 mr-1" />
+                      {detachingCertificate ? 'Detaching...' : 'Detach'}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-500">
+                      Attach a managed client certificate to use as this client&apos;s mTLS identity instead of a bring-your-own CA.
+                    </p>
+                    <div>
+                      <select
+                        value={selectedCertificateId}
+                        onChange={(e) => setSelectedCertificateId(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="">
+                          {loadingAttachableCertificates ? 'Loading certificates...' : 'Select a certificate...'}
+                        </option>
+                        {attachableCertificates.map((cert) => (
+                          <option key={cert.id} value={cert.id}>
+                            {cert.name} — {projects.find((p) => p.id === cert.projectId)?.name || cert.projectId}
+                          </option>
+                        ))}
+                      </select>
+                      {!loadingAttachableCertificates && attachableCertificates.length === 0 && (
+                        <p className="mt-1 text-xs text-gray-400">No attachable client certificates found.</p>
+                      )}
+                      {(() => {
+                        const selectedCert = attachableCertificates.find((c) => c.id === selectedCertificateId);
+                        if (!selectedCert || (!selectedCert.subject && (!selectedCert.uriSans || selectedCert.uriSans.length === 0))) {
+                          return null;
+                        }
+                        return (
+                          <p className="mt-1 text-xs text-gray-500">
+                            {selectedCert.subject && <>Subject: {selectedCert.subject}</>}
+                            {selectedCert.uriSans && selectedCert.uriSans.length > 0 && (
+                              <>{selectedCert.subject ? ' · ' : ''}SANs: {selectedCert.uriSans.join(', ')}</>
+                            )}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={handleAttachCertificate}
+                      disabled={!selectedCertificateId || attachingCertificate}
+                    >
+                      {attachingCertificate ? 'Attaching...' : 'Attach'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+
               {client.mtlsEnabled ? (
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
@@ -1338,16 +1487,34 @@ export default function ClientDetailPage() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => openMTLSModal(true)}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => openMTLSModal(true)}
+                        disabled={!!client.managedCertificateId}
+                        title={client.managedCertificateId ? 'Detach the managed certificate to configure a bring-your-own CA' : undefined}
+                      >
                         <Edit className="h-4 w-4 mr-1" />
                         Edit
                       </Button>
-                      <Button variant="danger" size="sm" onClick={() => setShowRemoveMTLSModal(true)}>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setShowRemoveMTLSModal(true)}
+                        disabled={!!client.managedCertificateId}
+                        title={client.managedCertificateId ? 'Detach the managed certificate to configure a bring-your-own CA' : undefined}
+                      >
                         <Trash2 className="h-4 w-4 mr-1" />
                         Remove
                       </Button>
                     </div>
                   </div>
+
+                  {client.managedCertificateId && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+                      Detach the managed certificate to configure a bring-your-own CA.
+                    </div>
+                  )}
 
                   <div className="grid md:grid-cols-2 gap-6">
                     <div>
@@ -1438,13 +1605,22 @@ export default function ClientDetailPage() {
                   <p className="text-gray-500 mb-6 max-w-md mx-auto">
                     Configure mTLS authentication to allow this client to authenticate using client certificates. The domain must also have mTLS enabled.
                   </p>
-                  <Button onClick={() => openMTLSModal(false)}>
+                  <Button
+                    onClick={() => openMTLSModal(false)}
+                    disabled={!!client.managedCertificateId}
+                    title={client.managedCertificateId ? 'Detach the managed certificate to configure a bring-your-own CA' : undefined}
+                  >
                     <Shield className="h-4 w-4 mr-2" />
                     Configure mTLS
                   </Button>
+                  {client.managedCertificateId && (
+                    <p className="text-sm text-gray-500 mt-3">
+                      Detach the managed certificate to configure a bring-your-own CA.
+                    </p>
+                  )}
                 </div>
               )}
-            </>
+            </div>
           )}
 
           {/* Attached Routes Tab */}

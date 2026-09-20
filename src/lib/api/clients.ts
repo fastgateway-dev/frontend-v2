@@ -13,6 +13,7 @@ import type {
   ConfigureJWTResponse,
   PaginatedResponse,
   MTLSSANEntry,
+  ManagedCertificate,
 } from '@/types';
 
 export interface UpdateClientMTLSInput {
@@ -119,5 +120,21 @@ export const clientsApi = {
   deleteMTLS: async (clientId: string): Promise<Client> => {
     const response = await apiClient.delete<Client>(`/clients/${clientId}/mtls`);
     return response.data;
+  },
+
+  // Certificate attachment
+  attachCertificate: async (clientId: string, certificateId: string): Promise<Client> => {
+    const response = await apiClient.put<Client>(`/clients/${clientId}/certificate`, { certificateId });
+    return response.data;
+  },
+
+  detachCertificate: async (clientId: string): Promise<Client> => {
+    const response = await apiClient.delete<Client>(`/clients/${clientId}/certificate`);
+    return response.data;
+  },
+
+  listAttachableCertificates: async (clientId: string): Promise<ManagedCertificate[]> => {
+    const response = await apiClient.get<{ data: ManagedCertificate[] }>(`/clients/${clientId}/attachable-certificates`);
+    return response.data.data;
   },
 };

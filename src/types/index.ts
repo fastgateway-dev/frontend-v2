@@ -1331,7 +1331,7 @@ export interface UpdateRouteInput {
 }
 
 // Approval types
-export type ApprovalAction = 'create' | 'update' | 'delete';
+export type ApprovalAction = 'create' | 'update' | 'delete' | 'export';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface ApprovalRequest {
@@ -1408,6 +1408,8 @@ export interface Client {
   mtlsHashes?: string[];
   mtlsCreatedAt?: string;
   mtlsCreatedBy?: string;
+  // Managed certificate identity (mutually exclusive with the BYO CA config above)
+  managedCertificateId?: string;
   // Header & Method Authorization
   allowedMethods?: string[];
   createdAt: string;
@@ -1984,6 +1986,7 @@ export interface RouteEdit {
 // Certificate types
 export type ManagedCertUsage = 'server' | 'client';
 export type ManagedCertStatus = 'pending' | 'issuing' | 'ready' | 'error';
+export type ManagedCertKeyMode = 'managed' | 'csr';
 export type IssuerType = 'self_signed_ca' | 'acme';
 export type IssuerStatus = 'pending' | 'ready' | 'error';
 export type CertDistStatus = 'pending' | 'synced' | 'error';
@@ -2033,6 +2036,11 @@ export interface ManagedCertificate {
   fingerprint?: string;
   notAfter?: string;
   createdAt: string;
+  keyMode?: ManagedCertKeyMode;
+  subject?: string;
+  uriSans?: string[];
+  exportAvailable?: boolean;
+  exportPending?: boolean;
 }
 export interface ManagedCertificateStatus { status: ManagedCertStatus; message?: string; notAfter?: string; }
 export interface CertificateDistribution {
@@ -2065,6 +2073,9 @@ export interface CreateCertificateInput {
   keyAlgorithm?: string;
   keySize?: number;
   durationDays?: number;
+  keyMode?: ManagedCertKeyMode;
+  uriSans?: string[];
+  csr?: string;
 }
 export interface CreateCertificateResponse { certificate: ManagedCertificate; approvalId: string | null; }
 

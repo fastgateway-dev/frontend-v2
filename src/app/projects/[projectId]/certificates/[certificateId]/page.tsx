@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, AlertCircle, Clock, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Clock, RefreshCw, Trash2, Download, Lock } from 'lucide-react';
 import { Button, Card, CardHeader, CardContent, Badge } from '@/components/ui';
 import { certificatesApi, permissionsApi } from '@/lib/api';
 import { hasCertPerm, certStatusBadge, distStatusBadge } from '@/lib/utils/certificates';
@@ -33,6 +33,10 @@ export default function CertificateDetailPage() {
   const [isResyncing, setIsResyncing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isRequestingExport, setIsRequestingExport] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const loadDistribution = useCallback(async () => {
     try {
@@ -70,11 +74,22 @@ export default function CertificateDetailPage() {
     loadData();
   }, [loadData]);
 
-  // Light polling of certificate status while transitional (pending/issuing).
+  const refreshCert = useCallback(async () => {
+    try {
+      const certData = await certificatesApi.get(projectId, certificateId);
+      setCert(certData);
+    } catch (err) {
+      console.error('Failed to refresh certificate:', err);
+    }
+  }, [projectId, certificateId]);
+
+  // Light polling of certificate status while transitional (pending/issuing),
+  // and of the certificate itself while an export approval is pending.
   const isTransitional = cert ? (cert.status === 'pending' || cert.status === 'issuing') : false;
+  const isExportPending = cert ? !!cert.exportPending : false;
 
   useEffect(() => {
-    if (!isTransitional) return;
+    if (!isTransitional && !isExportPending) return;
 
     let cancelled = false;
     let inFlight = false;
@@ -83,14 +98,25 @@ export default function CertificateDetailPage() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const statusData = await certificatesApi.getStatus(projectId, certificateId);
-        if (cancelled) return;
-        setCert((prev) => prev ? {
-          ...prev,
-          status: statusData.status,
-          notAfter: statusData.notAfter ?? prev.notAfter,
-          statusMessage: statusData.message ?? prev.statusMessage,
-        } : prev);
+        if (isTransitional) {
+          const statusData = await certificatesApi.getStatus(projectId, certificateId);
+          if (cancelled) return;
+          setCert((prev) => prev ? {
+            ...prev,
+            status: statusData.status,
+            notAfter: statusData.notAfter ?? prev.notAfter,
+            statusMessage: statusData.message ?? prev.statusMessage,
+          } : prev);
+        }
+        if (isExportPending) {
+          const certData = await certificatesApi.get(projectId, certificateId);
+          if (cancelled) return;
+          setCert((prev) => prev ? {
+            ...prev,
+            exportAvailable: certData.exportAvailable,
+            exportPending: certData.exportPending,
+          } : prev);
+        }
       } catch (err) {
         console.error('Failed to poll certificate status:', err);
       } finally {
@@ -102,7 +128,7 @@ export default function CertificateDetailPage() {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [isTransitional, projectId, certificateId]);
+  }, [isTransitional, isExportPending, projectId, certificateId]);
 
   const handleResync = async () => {
     setIsResyncing(true);
@@ -136,6 +162,49 @@ export default function CertificateDetailPage() {
     }
   };
 
+  const handleDownloadExport = async () => {
+    if (!cert) return;
+    setIsExporting(true);
+    setExportError(null);
+    setExportNotice(null);
+    try {
+      const blob = await certificatesApi.downloadExport(projectId, certificateId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${cert.name}.pem`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number; data?: { error?: string } } };
+      if (e.response?.status === 410) {
+        setExportError('That export was already used or expired — request a new one.');
+        await refreshCert();
+      } else {
+        setExportError(e.response?.data?.error || 'Failed to download export');
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleRequestExport = async () => {
+    setIsRequestingExport(true);
+    setExportError(null);
+    setExportNotice(null);
+    try {
+      await certificatesApi.requestExport(projectId, certificateId);
+      setExportNotice('Export requested — pending approval');
+      await refreshCert();
+    } catch (err: unknown) {
+      setExportError(extractErrorMessage(err, 'Failed to request export'));
+    } finally {
+      setIsRequestingExport(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="p-8">
@@ -165,6 +234,8 @@ export default function CertificateDetailPage() {
   const distSpec = distribution ? distStatusBadge(distribution.status) : null;
   const canResync = hasCertPerm(permissions, 'certificate.edit');
   const canDelete = hasCertPerm(permissions, 'certificate.delete');
+  const canExport = hasCertPerm(permissions, 'certificate.edit');
+  const showExportSection = cert.usage === 'client' && cert.status === 'ready';
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
@@ -250,12 +321,36 @@ export default function CertificateDetailPage() {
                 <span className="text-gray-900">{issuerNamesById[cert.issuerId] || cert.issuerId}</span>
               </div>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Key Mode</label>
+              <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <span className="text-gray-900">
+                  {cert.keyMode === 'csr' ? 'CSR (bring your own key)' : cert.keyMode === 'managed' ? 'Managed' : '—'}
+                </span>
+              </div>
+            </div>
             <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Hostnames</label>
               <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
                 <span className="text-gray-900">{cert.dnsNames && cert.dnsNames.length > 0 ? cert.dnsNames.join(', ') : '—'}</span>
               </div>
             </div>
+            {cert.usage === 'client' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <span className="text-gray-900">{cert.subject || '—'}</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">URI SANs</label>
+                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <span className="text-gray-900">{cert.uriSans && cert.uriSans.length > 0 ? cert.uriSans.join(', ') : '—'}</span>
+                  </div>
+                </div>
+              </>
+            )}
             <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Fingerprint</label>
               <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -324,6 +419,55 @@ export default function CertificateDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Export Section */}
+      {showExportSection && (
+        <Card className="mb-6">
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-gray-900">Export</h2>
+          </CardHeader>
+          <CardContent>
+            {exportError && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                <div>{exportError}</div>
+              </div>
+            )}
+            {exportNotice && !exportError && (
+              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-700">
+                {exportNotice}
+              </div>
+            )}
+            {cert.keyMode === 'csr' ? (
+              <p className="text-gray-500 flex items-center gap-2">
+                <Lock className="h-4 w-4 flex-shrink-0" />
+                You hold the private key (CSR mode). No export is available.
+              </p>
+            ) : !canExport ? (
+              <p className="text-gray-500 italic">You don&apos;t have permission to export this certificate.</p>
+            ) : cert.exportAvailable ? (
+              <Button onClick={handleDownloadExport} isLoading={isExporting}>
+                <Download className="h-4 w-4 mr-1" />
+                Download bundle
+              </Button>
+            ) : cert.exportPending ? (
+              <div className="flex items-center justify-between gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="flex items-center gap-2 text-yellow-800">
+                  <Clock className="h-5 w-5" />
+                  <span className="font-medium">Awaiting export approval</span>
+                </div>
+                <Link href={`/projects/${projectId}/approvals`} className="text-sm font-medium text-yellow-800 underline hover:no-underline whitespace-nowrap">
+                  View Approvals
+                </Link>
+              </div>
+            ) : (
+              <Button onClick={handleRequestExport} isLoading={isRequestingExport}>
+                Request export
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Delete Modal */}
       {showDeleteModal && (

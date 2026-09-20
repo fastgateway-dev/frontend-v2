@@ -49,3 +49,17 @@ test('status/distribution/resync/delete endpoints', async () => {
   await certificatesApi.delete('p1', 'c1');
   expect(apiClient.delete).toHaveBeenCalledWith('/projects/p1/certificates/c1');
 });
+
+test('requestExport posts to /export', async () => {
+  (apiClient.post as jest.Mock).mockResolvedValue({ data: { approvalId: 'a1' } });
+  const r = await certificatesApi.requestExport('p1', 'c1');
+  expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/certificates/c1/export');
+  expect(r.approvalId).toBe('a1');
+});
+test('downloadExport requests a blob', async () => {
+  const blob = new Blob(['x']);
+  (apiClient.get as jest.Mock).mockResolvedValue({ data: blob });
+  const r = await certificatesApi.downloadExport('p1', 'c1');
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/certificates/c1/export/download', { responseType: 'blob' });
+  expect(r).toBe(blob);
+});

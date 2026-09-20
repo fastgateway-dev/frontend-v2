@@ -36,8 +36,14 @@ export function validateCreateCertificate(input: CreateCertificateInput): Record
   if (!input.issuerId) errors.issuerId = 'Select an issuer';
   if (input.usage === 'server') {
     if (!input.dnsNames || input.dnsNames.length === 0) errors.dnsNames = 'Add at least one DNS name';
+  } else if (input.keyMode === 'csr') {
+    if (!input.csr || !input.csr.trim()) errors.csr = 'CSR PEM is required';
   } else {
-    if (!input.subject || !input.subject.trim()) errors.subject = 'Subject is required for a client certificate';
+    const hasSubject = !!input.subject && !!input.subject.trim();
+    const hasUriSans = !!input.uriSans && input.uriSans.length > 0;
+    if (!hasSubject && !hasUriSans) {
+      errors.subject = 'Subject or at least one URI SAN is required for a client certificate';
+    }
   }
   return errors;
 }

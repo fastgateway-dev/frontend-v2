@@ -3,14 +3,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Upload } from 'lucide-react';
 import {
   Button, Card, CardContent, Input, Select, TagInput,
   Accordion, AccordionItem, AccordionTrigger, AccordionContent,
 } from '@/components/ui';
 import { certificatesApi, projectsApi } from '@/lib/api';
 import { validateCreateCertificate } from '@/lib/utils/certificates';
-import type { Project, CertificateIssuer, CreateCertificateInput, ManagedCertUsage } from '@/types';
+import type { Project, CertificateIssuer, CreateCertificateInput, ManagedCertUsage, ManagedCertKeyMode } from '@/types';
 
 export default function CreateCertificatePage() {
   const params = useParams();
@@ -26,8 +26,11 @@ export default function CreateCertificatePage() {
   const [name, setName] = useState('');
   const [issuerId, setIssuerId] = useState('');
   const [usage, setUsage] = useState<ManagedCertUsage>('server');
+  const [keyMode, setKeyMode] = useState<ManagedCertKeyMode>('managed');
   const [dnsNames, setDnsNames] = useState<string[]>([]);
   const [subject, setSubject] = useState('');
+  const [uriSans, setUriSans] = useState<string[]>([]);
+  const [csr, setCsr] = useState('');
   const [keyAlgorithm, setKeyAlgorithm] = useState('');
   const [keySize, setKeySize] = useState('');
   const [durationDays, setDurationDays] = useState('');
@@ -62,6 +65,10 @@ export default function CreateCertificatePage() {
     }
   };
 
+  const filteredIssuers = usage === 'client'
+    ? issuers.filter((issuer) => issuer.type === 'self_signed_ca')
+    : issuers;
+
   const buildInput = (): CreateCertificateInput => {
     const input: CreateCertificateInput = {
       name: name.trim(),
@@ -70,12 +77,21 @@ export default function CreateCertificatePage() {
     };
     if (usage === 'server') {
       input.dnsNames = dnsNames;
+      if (keyAlgorithm.trim()) input.keyAlgorithm = keyAlgorithm.trim();
+      if (keySize.trim()) input.keySize = Number(keySize);
+      if (durationDays.trim()) input.durationDays = Number(durationDays);
     } else {
-      input.subject = subject.trim();
+      input.keyMode = keyMode;
+      if (keyMode === 'csr') {
+        input.csr = csr.trim();
+      } else {
+        input.subject = subject.trim();
+        if (uriSans.length > 0) input.uriSans = uriSans;
+        if (keyAlgorithm.trim()) input.keyAlgorithm = keyAlgorithm.trim();
+        if (keySize.trim()) input.keySize = Number(keySize);
+        if (durationDays.trim()) input.durationDays = Number(durationDays);
+      }
     }
-    if (keyAlgorithm.trim()) input.keyAlgorithm = keyAlgorithm.trim();
-    if (keySize.trim()) input.keySize = Number(keySize);
-    if (durationDays.trim()) input.durationDays = Number(durationDays);
     return input;
   };
 
@@ -84,6 +100,14 @@ export default function CreateCertificatePage() {
 
     const input = buildInput();
     const errors = validateCreateCertificate(input);
+
+    if (usage === 'client') {
+      const selectedIssuer = issuers.find((issuer) => issuer.id === issuerId);
+      if (!selectedIssuer || selectedIssuer.type !== 'self_signed_ca') {
+        errors.issuerId = errors.issuerId || 'Select a private-CA issuer for client certificates';
+      }
+    }
+
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
@@ -99,8 +123,22 @@ export default function CreateCertificatePage() {
     }
   };
 
+  const handleCsrFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      setCsr(content ?? '');
+      setFormErrors((prev) => ({ ...prev, csr: '' }));
+    };
+    reader.readAsText(file);
+  };
+
   const noIssuersGranted = !isLoading && !issuersError && issuers.length === 0;
-  const issuersUnavailable = noIssuersGranted || !!issuersError;
+  const noPrivateCaIssuers = !isLoading && !issuersError && usage === 'client'
+    && issuers.length > 0 && filteredIssuers.length === 0;
+  const issuersUnavailable = noIssuersGranted || noPrivateCaIssuers || !!issuersError;
 
   if (isLoading) {
     return (
@@ -146,6 +184,15 @@ export default function CreateCertificatePage() {
               </div>
             )}
 
+            {noPrivateCaIssuers && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-700">
+                  Client certificates require a private-CA issuer — ask an owner to create one.
+                </p>
+              </div>
+            )}
+
             <Input
               id="name"
               label="Name"
@@ -168,7 +215,7 @@ export default function CreateCertificatePage() {
               }}
               options={[
                 { value: '', label: 'Select an issuer...' },
-                ...issuers.map((issuer) => ({ value: issuer.id, label: issuer.name })),
+                ...filteredIssuers.map((issuer) => ({ value: issuer.id, label: issuer.name })),
               ]}
               error={formErrors.issuerId}
               disabled={issuersUnavailable}
@@ -178,12 +225,38 @@ export default function CreateCertificatePage() {
               id="usage"
               label="Usage"
               value={usage}
-              onChange={(e) => setUsage(e.target.value as ManagedCertUsage)}
+              onChange={(e) => {
+                const newUsage = e.target.value as ManagedCertUsage;
+                setUsage(newUsage);
+                setIssuerId('');
+                setKeyMode('managed');
+                setDnsNames([]);
+                setSubject('');
+                setUriSans([]);
+                setCsr('');
+                setFormErrors({});
+              }}
               options={[
                 { value: 'server', label: 'Server' },
                 { value: 'client', label: 'Client' },
               ]}
             />
+
+            {usage === 'client' && (
+              <Select
+                id="keyMode"
+                label="Key Mode"
+                value={keyMode}
+                onChange={(e) => {
+                  setKeyMode(e.target.value as ManagedCertKeyMode);
+                  setFormErrors((prev) => ({ ...prev, subject: '', csr: '' }));
+                }}
+                options={[
+                  { value: 'managed', label: 'Managed (generate key)' },
+                  { value: 'csr', label: 'CSR (bring your own key)' },
+                ]}
+              />
+            )}
 
             {usage === 'server' ? (
               <TagInput
@@ -197,56 +270,101 @@ export default function CreateCertificatePage() {
                 }}
                 error={formErrors.dnsNames}
               />
+            ) : keyMode === 'managed' ? (
+              <>
+                <Input
+                  id="subject"
+                  label="Subject"
+                  placeholder="e.g., CN=client-01"
+                  value={subject}
+                  onChange={(e) => {
+                    setSubject(e.target.value);
+                    setFormErrors((prev) => ({ ...prev, subject: '' }));
+                  }}
+                  error={formErrors.subject}
+                />
+                <TagInput
+                  id="uriSans"
+                  label="URI SANs"
+                  placeholder="Type a URI SAN and press Enter (e.g., spiffe://cluster/service)"
+                  value={uriSans}
+                  onChange={(tags) => {
+                    setUriSans(tags);
+                    setFormErrors((prev) => ({ ...prev, subject: '' }));
+                  }}
+                />
+              </>
             ) : (
-              <Input
-                id="subject"
-                label="Subject"
-                placeholder="e.g., CN=client-01"
-                value={subject}
-                onChange={(e) => {
-                  setSubject(e.target.value);
-                  setFormErrors((prev) => ({ ...prev, subject: '' }));
-                }}
-                error={formErrors.subject}
-              />
+              <div>
+                <label htmlFor="csr" className="block text-sm font-medium text-gray-700 mb-1">
+                  CSR (PEM)
+                </label>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                    <Upload className="h-4 w-4" />
+                    <span className="text-sm">Load from file</span>
+                    <input
+                      type="file"
+                      accept=".csr,.pem,.txt"
+                      onChange={handleCsrFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                  <span className="text-sm text-gray-500">or paste below</span>
+                </div>
+                <textarea
+                  id="csr"
+                  rows={8}
+                  className={`w-full px-3 py-2 border rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm ${formErrors.csr ? 'border-red-500' : 'border-gray-300'}`}
+                  placeholder="-----BEGIN CERTIFICATE REQUEST-----"
+                  value={csr}
+                  onChange={(e) => {
+                    setCsr(e.target.value);
+                    setFormErrors((prev) => ({ ...prev, csr: '' }));
+                  }}
+                />
+                {formErrors.csr && <p className="mt-1 text-sm text-red-500">{formErrors.csr}</p>}
+              </div>
             )}
 
-            <Accordion type="single">
-              <AccordionItem value="advanced">
-                <AccordionTrigger value="advanced">Advanced</AccordionTrigger>
-                <AccordionContent value="advanced">
-                  <div className="space-y-4">
-                    <Select
-                      id="keyAlgorithm"
-                      label="Key Algorithm"
-                      value={keyAlgorithm}
-                      onChange={(e) => setKeyAlgorithm(e.target.value)}
-                      options={[
-                        { value: '', label: 'Default (RSA)' },
-                        { value: 'RSA', label: 'RSA' },
-                        { value: 'ECDSA', label: 'ECDSA' },
-                      ]}
-                    />
-                    <Input
-                      id="keySize"
-                      label="Key Size"
-                      type="number"
-                      placeholder="Default: 2048"
-                      value={keySize}
-                      onChange={(e) => setKeySize(e.target.value)}
-                    />
-                    <Input
-                      id="durationDays"
-                      label="Duration (days)"
-                      type="number"
-                      placeholder="Default: 90"
-                      value={durationDays}
-                      onChange={(e) => setDurationDays(e.target.value)}
-                    />
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+            {!(usage === 'client' && keyMode === 'csr') && (
+              <Accordion type="single">
+                <AccordionItem value="advanced">
+                  <AccordionTrigger value="advanced">Advanced</AccordionTrigger>
+                  <AccordionContent value="advanced">
+                    <div className="space-y-4">
+                      <Select
+                        id="keyAlgorithm"
+                        label="Key Algorithm"
+                        value={keyAlgorithm}
+                        onChange={(e) => setKeyAlgorithm(e.target.value)}
+                        options={[
+                          { value: '', label: 'Default (RSA)' },
+                          { value: 'RSA', label: 'RSA' },
+                          { value: 'ECDSA', label: 'ECDSA' },
+                        ]}
+                      />
+                      <Input
+                        id="keySize"
+                        label="Key Size"
+                        type="number"
+                        placeholder="Default: 2048"
+                        value={keySize}
+                        onChange={(e) => setKeySize(e.target.value)}
+                      />
+                      <Input
+                        id="durationDays"
+                        label="Duration (days)"
+                        type="number"
+                        placeholder="Default: 90"
+                        value={durationDays}
+                        onChange={(e) => setDurationDays(e.target.value)}
+                      />
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            )}
 
             {createError && (
               <div className="p-4 rounded-lg bg-red-50 border border-red-200">

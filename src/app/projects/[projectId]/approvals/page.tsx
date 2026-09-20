@@ -128,6 +128,8 @@ export default function ApprovalsPage() {
         return <Badge variant="warning">UPDATE</Badge>;
       case 'delete':
         return <Badge variant="error">DELETE</Badge>;
+      case 'export':
+        return <Badge variant="success">EXPORT</Badge>;
       case 'attach':
         return <Badge variant="success">ATTACH</Badge>;
       case 'detach':

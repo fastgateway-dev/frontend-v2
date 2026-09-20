@@ -40,4 +40,12 @@ export const certificatesApi = {
   delete: async (projectId: string, certificateId: string): Promise<void> => {
     await apiClient.delete(`/projects/${projectId}/certificates/${certificateId}`);
   },
+  requestExport: async (projectId: string, certificateId: string): Promise<{ approvalId: string | null }> => {
+    const response = await apiClient.post<{ approvalId: string | null }>(`/projects/${projectId}/certificates/${certificateId}/export`);
+    return response.data;
+  },
+  downloadExport: async (projectId: string, certificateId: string): Promise<Blob> => {
+    const response = await apiClient.get(`/projects/${projectId}/certificates/${certificateId}/export/download`, { responseType: 'blob' });
+    return response.data as Blob;
+  },
 };
