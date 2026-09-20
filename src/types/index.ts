@@ -2040,7 +2040,6 @@ export interface ManagedCertificate {
   subject?: string;
   uriSans?: string[];
   exportAvailable?: boolean;
-  exportPending?: boolean;
 }
 export interface ManagedCertificateStatus { status: ManagedCertStatus; message?: string; notAfter?: string; }
 export interface CertificateDistribution {

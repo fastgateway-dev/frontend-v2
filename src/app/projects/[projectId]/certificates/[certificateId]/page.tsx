@@ -36,7 +36,7 @@ export default function CertificateDetailPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [isRequestingExport, setIsRequestingExport] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [exportRequested, setExportRequested] = useState(false);
 
   const loadDistribution = useCallback(async () => {
     try {
@@ -84,9 +84,9 @@ export default function CertificateDetailPage() {
   }, [projectId, certificateId]);
 
   // Light polling of certificate status while transitional (pending/issuing),
-  // and of the certificate itself while an export approval is pending.
+  // and of the certificate itself while a locally-requested export is still awaiting approval.
   const isTransitional = cert ? (cert.status === 'pending' || cert.status === 'issuing') : false;
-  const isExportPending = cert ? !!cert.exportPending : false;
+  const isExportPending = exportRequested && !cert?.exportAvailable;
 
   useEffect(() => {
     if (!isTransitional && !isExportPending) return;
@@ -114,7 +114,6 @@ export default function CertificateDetailPage() {
           setCert((prev) => prev ? {
             ...prev,
             exportAvailable: certData.exportAvailable,
-            exportPending: certData.exportPending,
           } : prev);
         }
       } catch (err) {
@@ -166,7 +165,6 @@ export default function CertificateDetailPage() {
     if (!cert) return;
     setIsExporting(true);
     setExportError(null);
-    setExportNotice(null);
     try {
       const blob = await certificatesApi.downloadExport(projectId, certificateId);
       const url = window.URL.createObjectURL(blob);
@@ -193,10 +191,9 @@ export default function CertificateDetailPage() {
   const handleRequestExport = async () => {
     setIsRequestingExport(true);
     setExportError(null);
-    setExportNotice(null);
     try {
       await certificatesApi.requestExport(projectId, certificateId);
-      setExportNotice('Export requested — pending approval');
+      setExportRequested(true);
       await refreshCert();
     } catch (err: unknown) {
       setExportError(extractErrorMessage(err, 'Failed to request export'));
@@ -433,11 +430,6 @@ export default function CertificateDetailPage() {
                 <div>{exportError}</div>
               </div>
             )}
-            {exportNotice && !exportError && (
-              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-700">
-                {exportNotice}
-              </div>
-            )}
             {cert.keyMode === 'csr' ? (
               <p className="text-gray-500 flex items-center gap-2">
                 <Lock className="h-4 w-4 flex-shrink-0" />
@@ -450,11 +442,11 @@ export default function CertificateDetailPage() {
                 <Download className="h-4 w-4 mr-1" />
                 Download bundle
               </Button>
-            ) : cert.exportPending ? (
+            ) : exportRequested ? (
               <div className="flex items-center justify-between gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <div className="flex items-center gap-2 text-yellow-800">
                   <Clock className="h-5 w-5" />
-                  <span className="font-medium">Awaiting export approval</span>
+                  <span className="font-medium">Export requested — pending approval.</span>
                 </div>
                 <Link href={`/projects/${projectId}/approvals`} className="text-sm font-medium text-yellow-800 underline hover:no-underline whitespace-nowrap">
                   View Approvals
