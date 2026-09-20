@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import {
   Globe,
   Users,
@@ -73,18 +73,36 @@ export function Sidebar({ projectId }: SidebarProps) {
     { href: '/api-docs', icon: BookOpen, label: 'API Docs' },
   ];
 
-  // Admin-only navigation items (system-level)
+  // Admin-only navigation (system-level), grouped into labeled sub-sections.
   const isOwner = user?.role === 'owner';
-  const adminNavItems = isOwner
+  const adminGroups = isOwner
     ? [
-        { href: '/users', icon: Users2, label: 'Users' },
-        { href: '/teams', icon: Users, label: 'Teams' },
-        { href: '/sso', icon: Shield, label: 'SSO' },
-        { href: '/certificates', icon: ShieldCheck, label: 'All Certificates' },
-        { href: '/certificate-issuers', icon: Stamp, label: 'Certificate Issuers' },
-        { href: '/dns-credentials', icon: Cloud, label: 'DNS Credentials' },
-        { href: '/settings', icon: Settings, label: 'Settings' },
+        {
+          title: 'IAM',
+          items: [
+            { href: '/users', icon: Users2, label: 'Users' },
+            { href: '/teams', icon: Users, label: 'Teams' },
+            { href: '/sso', icon: Shield, label: 'SSO' },
+          ],
+        },
+        {
+          title: 'Certificate',
+          items: [
+            { href: '/certificates', icon: ShieldCheck, label: 'All Certificates' },
+            { href: '/certificate-issuers', icon: Stamp, label: 'Issuers' },
+          ],
+        },
+        {
+          title: 'DNS',
+          items: [
+            { href: '/dns-credentials', icon: Cloud, label: 'Provider' },
+          ],
+        },
       ]
+    : [];
+  // Standalone admin items rendered directly under ADMIN (no sub-group header).
+  const adminStandaloneItems = isOwner
+    ? [{ href: '/settings', icon: Settings, label: 'Settings' }]
     : [];
 
   // Build project nav items based on permissions - grouped by category
@@ -190,14 +208,19 @@ export function Sidebar({ projectId }: SidebarProps) {
           </Link>
         ))}
 
-        {adminNavItems.length > 0 && (
+        {isOwner && (
           <>
-            <div className="pt-4 pb-2">
+            <div className="pt-4 pb-1">
               <p className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                 Admin
               </p>
             </div>
-            {adminNavItems.map((item) => (
+            {adminGroups.map((group) => (
+              <Fragment key={group.title}>
+                {renderNavGroup(group.title, group.items)}
+              </Fragment>
+            ))}
+            {adminStandaloneItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
