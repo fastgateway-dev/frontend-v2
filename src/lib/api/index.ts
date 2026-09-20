@@ -19,4 +19,7 @@ export { commentsApi } from './comments';
 export { notificationsApi } from './notifications';
 export { routeVersionsApi } from './route-versions';
 export { systemSettingsApi } from './systemSettings';
+export { dnsCredentialsApi } from './dns-credentials';
+export { certificateIssuersApi } from './certificate-issuers';
+export { certificatesApi } from './certificates';
 export { setTokens, getTokens, clearTokens } from './client';

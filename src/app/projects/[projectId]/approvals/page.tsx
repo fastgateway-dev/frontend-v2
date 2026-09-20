@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle, Clock, Eye, Route, Shield, XCircle, MinusCircle } from 'lucide-react';
+import { CheckCircle, Clock, Eye, Route, Shield, Lock, XCircle, MinusCircle } from 'lucide-react';
 import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent, Select } from '@/components/ui';
 import { approvalsApi, clientAttachmentsApi } from '@/lib/api';
 import type { ApprovalRequest, Approval, ApprovalStatus, ApprovalStage } from '@/types';
@@ -11,7 +11,7 @@ import type { ApprovalRequest, Approval, ApprovalStatus, ApprovalStage } from '@
 // Unified approval item for display
 interface UnifiedApproval {
   id: string;
-  entityType: 'route' | 'client_attachment';
+  entityType: 'route' | 'client_attachment' | 'certificate';
   entityName: string;
   domainName?: string;
   action: string;
@@ -37,7 +37,7 @@ export default function ApprovalsPage() {
 
   const [approvals, setApprovals] = useState<UnifiedApproval[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'all' | 'route' | 'client'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'route' | 'client' | 'certificate'>('all');
   const [statusFilter, setStatusFilter] = useState<string>('');
 
   useEffect(() => {
@@ -54,27 +54,36 @@ export default function ApprovalsPage() {
         clientAttachmentsApi.listApprovals(projectId, 1, 50, statusFilter).catch(() => ({ data: [] })),
       ]);
 
-      // Convert route approvals to unified format
-      const routeApprovals: UnifiedApproval[] = (routeApprovalsRes.data || []).map((r: ApprovalRequest) => ({
-        id: r.id,
-        entityType: 'route' as const,
-        entityName: r.entityName || r.configSnapshot?.matches?.[0]?.path?.value || r.route?.name || 'Route',
-        domainName: r.domainName,
-        action: r.action,
-        status: r.status,
-        submitter: r.submitter ? { id: r.submittedBy, username: r.submitter.username } : undefined,
-        stages: r.stages?.map((s: ApprovalStage) => ({
-          id: s.id,
-          order: s.order,
-          status: s.status,
-          requiredPermission: s.requiredPermission,
-          reviewer: s.reviewer ? { id: s.reviewedBy || '', username: s.reviewer.username } : undefined,
-          reviewedAt: s.reviewedAt,
-          comment: s.comment,
-        })),
-        createdAt: r.createdAt,
-        detailUrl: `/projects/${projectId}/approvals/${r.id}`,
-      }));
+      // Convert route/certificate approvals to unified format
+      // Note: approvalsApi.list has no entityType filter — it returns BOTH route and
+      // certificate approvals from the shared approval engine, so honor each row's own
+      // entityType instead of assuming 'route'.
+      const routeApprovals: UnifiedApproval[] = (routeApprovalsRes.data || []).map((r: ApprovalRequest) => {
+        const entityType = r.entityType ?? 'route';
+        const entityName = entityType === 'certificate'
+          ? (r.entityName || 'Certificate')
+          : (r.entityName || r.configSnapshot?.matches?.[0]?.path?.value || r.route?.name || 'Route');
+        return {
+          id: r.id,
+          entityType,
+          entityName,
+          domainName: r.domainName,
+          action: r.action,
+          status: r.status,
+          submitter: r.submitter ? { id: r.submittedBy, username: r.submitter.username } : undefined,
+          stages: r.stages?.map((s: ApprovalStage) => ({
+            id: s.id,
+            order: s.order,
+            status: s.status,
+            requiredPermission: s.requiredPermission,
+            reviewer: s.reviewer ? { id: s.reviewedBy || '', username: s.reviewer.username } : undefined,
+            reviewedAt: s.reviewedAt,
+            comment: s.comment,
+          })),
+          createdAt: r.createdAt,
+          detailUrl: `/projects/${projectId}/approvals/${r.id}`,
+        };
+      });
 
       // Convert client approvals to unified format
       const clientApprovals: UnifiedApproval[] = (clientApprovalsRes.data || []).map((c: Approval) => ({
@@ -128,12 +137,20 @@ export default function ApprovalsPage() {
     }
   };
 
-  const getEntityTypeBadge = (entityType: 'route' | 'client_attachment') => {
+  const getEntityTypeBadge = (entityType: 'route' | 'client_attachment' | 'certificate') => {
     if (entityType === 'route') {
       return (
         <span className="inline-flex items-center gap-1 text-xs text-primary-600 bg-primary-50 px-2 py-0.5 rounded">
           <Route className="h-3 w-3" />
           Route
+        </span>
+      );
+    }
+    if (entityType === 'certificate') {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+          <Lock className="h-3 w-3" />
+          Certificate
         </span>
       );
     }
@@ -229,11 +246,13 @@ export default function ApprovalsPage() {
     if (activeTab === 'all') return true;
     if (activeTab === 'route') return a.entityType === 'route';
     if (activeTab === 'client') return a.entityType === 'client_attachment';
+    if (activeTab === 'certificate') return a.entityType === 'certificate';
     return true;
   });
 
   const routeCount = approvals.filter(a => a.entityType === 'route').length;
   const clientCount = approvals.filter(a => a.entityType === 'client_attachment').length;
+  const certificateCount = approvals.filter(a => a.entityType === 'certificate').length;
 
   if (isLoading) {
     return (
@@ -271,7 +290,7 @@ export default function ApprovalsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="all" value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'route' | 'client')}>
+      <Tabs defaultValue="all" value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'route' | 'client' | 'certificate')}>
         <TabsList className="mb-4">
           <TabsTrigger value="all">
             All ({approvals.length})
@@ -281,6 +300,9 @@ export default function ApprovalsPage() {
           </TabsTrigger>
           <TabsTrigger value="client">
             Clients ({clientCount})
+          </TabsTrigger>
+          <TabsTrigger value="certificate">
+            Certificates ({certificateCount})
           </TabsTrigger>
         </TabsList>
 

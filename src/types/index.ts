@@ -1337,7 +1337,7 @@ export interface ApprovalRequest {
   id: string;
   routeId: string;
   route?: Route;
-  entityType?: 'route' | 'client_attachment';
+  entityType?: 'route' | 'client_attachment' | 'certificate';
   action: ApprovalAction;
   configSnapshot?: RouteConfig;
   previousConfig?: RouteConfig;
@@ -1572,7 +1572,7 @@ export interface ApprovalStageReview {
 export interface ApprovalPolicy {
   id: string;
   projectId: string;
-  entityType: 'route' | 'client_attachment';
+  entityType: 'route' | 'client_attachment' | 'certificate';
   action?: string | null;
   stages: PolicyStageTemplate[];
   createdAt: string;
@@ -1589,7 +1589,7 @@ export interface PolicyStageTemplate {
 export interface Approval {
   id: string;
   projectId: string;
-  entityType: 'route' | 'client_attachment';
+  entityType: 'route' | 'client_attachment' | 'certificate';
   entityId: string;
   action: string;
   configSnapshot?: unknown;
@@ -1979,3 +1979,90 @@ export interface RouteEdit {
   backend?: DefaultBackend;
   description?: string;
 }
+
+// Certificate types
+export type ManagedCertUsage = 'server' | 'client';
+export type ManagedCertStatus = 'pending' | 'issuing' | 'ready' | 'error';
+export type IssuerType = 'self_signed_ca' | 'acme';
+export type IssuerStatus = 'pending' | 'ready' | 'error';
+export type CertDistStatus = 'pending' | 'synced' | 'error';
+
+export interface IssuerConfig {
+  commonName?: string;
+  keyAlgorithm?: string;
+  keySize?: number;
+  durationDays?: number;
+  server?: string;
+  email?: string;
+  eabKeyId?: string;
+  dnsCredentialId?: string;
+  clusterIssuerName?: string;
+}
+export interface CertificateIssuer {
+  id: string;
+  name: string;
+  type: IssuerType;
+  status: IssuerStatus;
+  statusMessage?: string;
+  config: IssuerConfig;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface IssuerStatusResponse { status: IssuerStatus; statusMessage?: string; }
+
+export interface IssuerProjectGrant {
+  id: string;
+  issuerId: string;
+  projectId: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+// FLAT response shape — no `config` wrapper (mirrors backend managedCertificateResponse).
+export interface ManagedCertificate {
+  id: string;
+  projectId: string;
+  name: string;
+  issuerId: string;
+  usage: ManagedCertUsage;
+  dnsNames?: string[];
+  status: ManagedCertStatus;
+  statusMessage?: string;
+  fingerprint?: string;
+  notAfter?: string;
+  createdAt: string;
+}
+export interface ManagedCertificateStatus { status: ManagedCertStatus; message?: string; notAfter?: string; }
+export interface CertificateDistribution {
+  status: CertDistStatus;
+  lastPushedFingerprint?: string;
+  message?: string;
+  lastSyncedAt?: string;
+}
+
+export interface DNSProviderCredential {
+  id: string;
+  name: string;
+  providerType: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface CreateDNSCredentialInput { name: string; providerType: string; credentials: { apiToken: string }; }
+export interface UpdateDNSCredentialInput { name?: string; credentials?: { apiToken: string }; }
+
+export type CreateIssuerInput =
+  | { type: 'self_signed_ca'; name: string; commonName: string; keyAlgorithm: string; keySize: number; durationDays: number }
+  | { type: 'acme'; name: string; server: string; email: string; dnsCredentialId: string; eab?: { keyId: string; hmacKey: string } };
+
+export interface CreateCertificateInput {
+  name: string;
+  issuerId: string;
+  usage: ManagedCertUsage;
+  dnsNames?: string[];
+  subject?: string;
+  keyAlgorithm?: string;
+  keySize?: number;
+  durationDays?: number;
+}
+export interface CreateCertificateResponse { certificate: ManagedCertificate; approvalId: string | null; }
