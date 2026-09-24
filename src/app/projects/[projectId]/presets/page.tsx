@@ -45,6 +45,16 @@ const PERMISSION_GROUPS = [
     ],
   },
   {
+    domain: 'Certificate',
+    permissions: [
+      { value: 'certificate.view', label: 'View', description: 'View certificates' },
+      { value: 'certificate.create', label: 'Create', description: 'Create new certificates' },
+      { value: 'certificate.edit', label: 'Edit', description: 'Edit existing certificates' },
+      { value: 'certificate.delete', label: 'Delete', description: 'Delete certificates' },
+      { value: 'certificate.approve', label: 'Approve', description: 'Approve/reject certificate issuance & export' },
+    ],
+  },
+  {
     domain: 'Project',
     permissions: [
       { value: 'project.settings', label: 'Settings', description: 'Manage project settings' },
