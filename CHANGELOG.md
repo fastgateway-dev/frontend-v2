@@ -2,6 +2,13 @@
 
 All notable changes to the FastGateway frontend are documented here.
 
+## v0.1.1 — 2026-09-24
+
+Patch release. Adds the missing **Certificate** permission group
+(view/create/edit/delete/approve) to the permission-preset form, so
+`certificate.*` permissions — including `certificate.approve` — can be
+granted to teams via the UI.
+
 ## v0.1.0 — 2026-09-24
 
 First open-source release of the **FastGateway** web UI — the management
