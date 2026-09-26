@@ -2000,7 +2000,7 @@ export interface IssuerConfig {
   email?: string;
   eabKeyId?: string;
   dnsCredentialId?: string;
-  clusterIssuerName?: string;
+  issuerName?: string;
 }
 export interface CertificateIssuer {
   id: string;

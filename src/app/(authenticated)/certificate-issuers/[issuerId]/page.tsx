@@ -269,10 +269,10 @@ export default function CertificateIssuerDetailPage() {
                     </dd>
                   </div>
                 )}
-                {issuer.config.clusterIssuerName && (
+                {issuer.config.issuerName && (
                   <div>
-                    <dt className="text-sm text-gray-500">Cluster Issuer</dt>
-                    <dd className="text-sm text-gray-900">{issuer.config.clusterIssuerName}</dd>
+                    <dt className="text-sm text-gray-500">Issuer</dt>
+                    <dd className="text-sm text-gray-900">{issuer.config.issuerName}</dd>
                   </div>
                 )}
               </>
