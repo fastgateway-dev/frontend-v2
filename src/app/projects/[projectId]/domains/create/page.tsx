@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Button, Card, CardContent, Tabs, TabsList, TabsTrigger, TabsContent, Select, Input } from '@/components/ui';
 import { YamlDiffViewer } from '@/components/features/yaml-diff-viewer';
 import { AIReviewCard } from '@/components/features/ai-review-card';
+import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { domainsApi, domainTemplatesApi, projectsApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
 import { LabelsEditor } from '@/components/ui/labels-editor';
@@ -388,25 +389,16 @@ export default function CreateDomainPage() {
                           <label htmlFor="tlsSecretName" className="block text-sm font-medium text-foreground mb-1">
                             TLS Secret Name
                           </label>
-                          <input
+                          <TlsSecretCombobox
                             id="tlsSecretName"
-                            list="tls-secrets-list"
-                            type="text"
-                            className="w-full px-3 py-2 bg-input border border-border rounded-md text-foreground placeholder-muted focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                            placeholder={loadingSecrets ? 'Loading secrets...' : 'Select or type a secret name'}
                             value={tlsSecretName}
-                            onChange={(e) => {
-                              setTlsSecretName(e.target.value);
+                            onChange={(v) => {
+                              setTlsSecretName(v);
                               setFormErrors(prev => ({ ...prev, tlsSecretName: '' }));
                             }}
+                            secrets={tlsSecrets}
+                            loading={loadingSecrets}
                           />
-                          <datalist id="tls-secrets-list">
-                            {tlsSecrets.map(secret => (
-                              <option key={secret.name} value={secret.name}>
-                                {secret.name} {secret.managedByFastgateway ? '(Managed)' : '(External)'}
-                              </option>
-                            ))}
-                          </datalist>
                           {secretListError && (
                             <p className="mt-1 text-sm text-gray-500">Secret listing unavailable. You can still type a secret name manually.</p>
                           )}

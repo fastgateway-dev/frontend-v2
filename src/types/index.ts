@@ -282,6 +282,9 @@ export interface TLSSecretInfo {
   name: string;
   namespace: string;
   managedByFastgateway: boolean;
+  /** Human-facing name FastGateway stamped on the secret (annotation
+   * fastgateway.dev/name). Empty for secrets FastGateway did not issue. */
+  displayName?: string;
   labels: Record<string, string>;
   createdAt: string;
 }
