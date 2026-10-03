@@ -112,12 +112,12 @@ export default function DomainsPage() {
 
       {/* Search Bar */}
       <div className="flex items-center gap-2 mb-4">
-        <div className="relative flex-1 max-w-md">
-          <div className="flex">
+        <div className="relative flex-1 max-w-3xl">
+          <div className="flex gap-2">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 border border-r-0 border-gray-300 rounded-l-md bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="">All Status</option>
               <option value="active">Active</option>
@@ -130,7 +130,7 @@ export default function DomainsPage() {
                 setSearchField(e.target.value as 'hostname' | 'labels');
                 setSearchQuery('');
               }}
-              className="px-3 py-2 border border-r-0 border-gray-300 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="hostname">Hostname</option>
               <option value="labels">Labels</option>
@@ -144,7 +144,7 @@ export default function DomainsPage() {
                   : 'Search by hostname...'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-r-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               />
             </div>
           </div>

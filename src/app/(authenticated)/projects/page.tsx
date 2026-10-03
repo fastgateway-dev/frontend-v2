@@ -80,15 +80,15 @@ export default function ProjectsPage() {
 
       {/* Search Bar */}
       <div className="flex items-center gap-2 mb-4">
-        <div className="relative flex-1 max-w-md">
-          <div className="flex">
+        <div className="relative flex-1 max-w-2xl">
+          <div className="flex gap-2">
             <select
               value={searchField}
               onChange={(e) => {
                 setSearchField(e.target.value as 'name' | 'labels');
                 setSearchQuery('');
               }}
-              className="px-3 py-2 border border-r-0 border-gray-300 rounded-l-md bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="name">Name</option>
               <option value="labels">Labels</option>
@@ -102,7 +102,7 @@ export default function ProjectsPage() {
                   : 'Search projects by name...'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-r-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               />
             </div>
           </div>
