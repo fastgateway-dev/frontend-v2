@@ -220,16 +220,20 @@ export function Sidebar({ projectId }: SidebarProps) {
                 {renderNavGroup(group.title, group.items)}
               </Fragment>
             ))}
-            {adminStandaloneItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn('sidebar-link', isActive(item.href) && 'active')}
-              >
-                <item.icon className="h-5 w-5" />
-                {item.label}
-              </Link>
-            ))}
+            {adminStandaloneItems.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                {adminStandaloneItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn('sidebar-link', isActive(item.href) && 'active')}
+                  >
+                    <item.icon className="h-5 w-5" />
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            )}
           </>
         )}
 
