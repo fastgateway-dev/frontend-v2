@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, AlertTriangle, Info, X, Shield, Trash2, Upload, Sparkles, MessageSquare } from 'lucide-react';
-import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent, Accordion, AccordionItem, AccordionTrigger, AccordionContent, Input, InfoTooltip } from '@/components/ui';
+import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent, Accordion, AccordionItem, AccordionTrigger, AccordionContent, Input, InfoTooltip, Select } from '@/components/ui';
 import { domainsApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
+import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { AIReviewCard } from '@/components/features/ai-review-card';
 import { YamlDiffViewer } from '@/components/features/yaml-diff-viewer';
 import { AIChatPanel } from '@/components/AIChatPanel';
@@ -15,7 +16,7 @@ import ResponseOverrideForm from '@/components/ResponseOverrideForm';
 import LuaExtensionForm from '@/components/LuaExtensionForm';
 import WasmExtensionForm from '@/components/WasmExtensionForm';
 import ExtProcExtensionForm from '@/components/ExtProcExtensionForm';
-import type { Domain, DomainSettings, TLSProfile, MTLSCACert, MTLSSANEntry, AIReviewResult, AIChatContext, CompressionType, LoadBalancerType, ConsistentHashType, RetryConfig, RetryOn, PerRetryPolicy, BackOffPolicy, CircuitBreakerConfig, RequestBufferConfig, ResponseOverrideRule, BTPTimeoutConfig, BackendTrafficPolicyConfig, EnvoyExtensionPolicyConfig, LuaExtensionConfig, WasmExtensionConfig, ExtProcExtensionConfig } from '@/types';
+import type { Domain, DomainSettings, TLSProfile, TLSSecretInfo, MTLSCACert, MTLSSANEntry, AIReviewResult, AIChatContext, CompressionType, LoadBalancerType, ConsistentHashType, RetryConfig, RetryOn, PerRetryPolicy, BackOffPolicy, CircuitBreakerConfig, RequestBufferConfig, ResponseOverrideRule, BTPTimeoutConfig, BackendTrafficPolicyConfig, EnvoyExtensionPolicyConfig, LuaExtensionConfig, WasmExtensionConfig, ExtProcExtensionConfig } from '@/types';
 
 // TLS Profile presets
 const TLS_PROFILES: Record<TLSProfile, { label: string; description: string; minVersion: string; maxVersion: string; ciphers: string[] }> = {
@@ -65,6 +66,20 @@ export default function DomainSettingsPage() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [domainSettings, setDomainSettings] = useState<DomainSettings | null>(null);
+
+  // TLS Certificate (domain-level Gateway listener secret) state.
+  // This is the cert the Gateway serves, distinct from the ClientTrafficPolicy
+  // TLS params below; it is saved via domainsApi.update, not updateSettings.
+  const [certSecretName, setCertSecretName] = useState('');
+  const [certSecretNamespace, setCertSecretNamespace] = useState('fastgateway-system');
+  const [tlsSecrets, setTlsSecrets] = useState<TLSSecretInfo[]>([]);
+  const [certNamespaces, setCertNamespaces] = useState<string[]>(['fastgateway-system']);
+  const [loadingSecrets, setLoadingSecrets] = useState(false);
+  const [secretWarning, setSecretWarning] = useState('');
+  const [secretListError, setSecretListError] = useState(false);
+  const [isSavingCert, setIsSavingCert] = useState(false);
+  const [certError, setCertError] = useState<string | null>(null);
+  const [certSaved, setCertSaved] = useState(false);
 
   // Client Connection state
   const [tcpKeepaliveEnabled, setTcpKeepaliveEnabled] = useState(false);
@@ -186,6 +201,79 @@ export default function DomainSettingsPage() {
     loadData();
   }, [projectId, domainId]);
 
+  // The domain serves TLS (so a certificate applies) unless its template is no_tls.
+  const needsTLS = !!domain && domain.tlsMode !== 'no_tls';
+
+  const fetchTLSSecrets = useCallback(async (namespace?: string) => {
+    if (!projectId) return;
+    setLoadingSecrets(true);
+    setSecretListError(false);
+    try {
+      const result = await domainsApi.listTLSSecrets(projectId, namespace);
+      setTlsSecrets(result.secrets);
+      setCertNamespaces(result.availableNamespaces);
+    } catch {
+      setTlsSecrets([]);
+      setSecretListError(true);
+    } finally {
+      setLoadingSecrets(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (needsTLS) {
+      fetchTLSSecrets(certSecretNamespace);
+    }
+  }, [needsTLS, certSecretNamespace, fetchTLSSecrets]);
+
+  useEffect(() => {
+    if (!certSecretName || !needsTLS || loadingSecrets) {
+      setSecretWarning('');
+      return;
+    }
+    const exists = tlsSecrets.some(s => s.name === certSecretName);
+    if (!exists && certSecretName.trim()) {
+      setSecretWarning(`Secret '${certSecretName}' was not found in namespace '${certSecretNamespace}'. It must exist before the domain can serve TLS traffic.`);
+    } else {
+      setSecretWarning('');
+    }
+  }, [certSecretName, tlsSecrets, certSecretNamespace, needsTLS, loadingSecrets]);
+
+  const handleUpdateCertificate = async () => {
+    if (!certSecretName.trim()) {
+      setCertError('TLS Secret Name is required');
+      return;
+    }
+    setIsSavingCert(true);
+    setCertError(null);
+    setCertSaved(false);
+    try {
+      const updated = await domainsApi.update(projectId, domainId, {
+        // Always send the explicit namespace on update. The backend's Update
+        // only assigns TLSSecretNamespace when the field is non-empty, so
+        // omitting it (as the create flow does for the default namespace)
+        // would leave the domain's old namespace stuck when moving a secret
+        // back into fastgateway-system. 'fastgateway-system' is a valid
+        // non-empty value the backend accepts without namespace validation.
+        tlsSecretName: certSecretName.trim(),
+        tlsSecretNamespace: certSecretNamespace,
+      });
+      setDomain(updated);
+      setCertSecretName(updated.tlsSecretName || '');
+      setCertSecretNamespace(updated.tlsSecretNamespace || 'fastgateway-system');
+      setCertSaved(true);
+      // Refresh the Gateway manifest so the Manifests tab reflects the
+      // re-applied listener rather than the pre-change YAML.
+      const yamls = await domainsApi.getYamls(projectId, domainId).catch(() => null);
+      if (yamls) setGatewayYaml(yamls.gatewayYaml || '');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      setCertError(err.response?.data?.error || 'Failed to update certificate');
+    } finally {
+      setIsSavingCert(false);
+    }
+  };
+
   const loadData = async () => {
     try {
       const [domainData, settingsData, yamlsData, aiStatus] = await Promise.all([
@@ -196,6 +284,8 @@ export default function DomainSettingsPage() {
       ]);
 
       setDomain(domainData);
+      setCertSecretName(domainData.tlsSecretName || '');
+      setCertSecretNamespace(domainData.tlsSecretNamespace || 'fastgateway-system');
       setAiEnabled(aiStatus.enabled);
 
       if (settingsData) {
@@ -807,6 +897,95 @@ export default function DomainSettingsPage() {
               {settingsError && (
                 <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
                   {settingsError}
+                </div>
+              )}
+
+              {/* TLS Certificate — the secret the Gateway serves for this domain.
+                  Saved via domainsApi.update (its own action), separate from the
+                  ClientTrafficPolicy "Save Settings" below, since it applies a
+                  live Gateway listener change immediately. */}
+              {needsTLS && (
+                <div className="mb-6 p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Shield className="h-4 w-4 text-gray-500" />
+                    <h3 className="text-sm font-semibold text-gray-900">TLS Certificate</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">
+                    The certificate this domain serves. Select a managed certificate or an existing TLS secret to change it.
+                  </p>
+
+                  <div className="space-y-3 max-w-2xl">
+                    {(() => {
+                      // Always include the domain's current namespace as an option,
+                      // even if it is no longer in the project's managed list, so the
+                      // Select never renders a value absent from its options.
+                      const nsOptions = certNamespaces.includes(certSecretNamespace)
+                        ? certNamespaces
+                        : [certSecretNamespace, ...certNamespaces];
+                      return nsOptions.length > 1 && (
+                        <Select
+                          id="certSecretNamespace"
+                          label="TLS Secret Namespace"
+                          value={certSecretNamespace}
+                          onChange={(e) => {
+                            setCertSecretNamespace(e.target.value);
+                            setCertSecretName('');
+                            setCertSaved(false);
+                          }}
+                          options={nsOptions.map(ns => ({ value: ns, label: ns }))}
+                        />
+                      );
+                    })()}
+
+                    <div>
+                      <label htmlFor="certSecretName" className="block text-sm font-medium text-foreground mb-1">
+                        TLS Secret Name
+                      </label>
+                      <TlsSecretCombobox
+                        id="certSecretName"
+                        value={certSecretName}
+                        onChange={(v) => {
+                          setCertSecretName(v);
+                          setCertError(null);
+                          setCertSaved(false);
+                        }}
+                        secrets={tlsSecrets}
+                        loading={loadingSecrets}
+                      />
+                      {secretListError && (
+                        <p className="mt-1 text-sm text-gray-500">Secret listing unavailable. You can still type a secret name manually.</p>
+                      )}
+                      {secretWarning && (
+                        <p className="mt-1 text-sm text-amber-600">{secretWarning}</p>
+                      )}
+                    </div>
+
+                    {certError && (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+                        {certError}
+                      </div>
+                    )}
+                    {certSaved && (
+                      <div className="p-3 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm">
+                        Certificate updated. The Gateway listener has been re-applied.
+                      </div>
+                    )}
+
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={handleUpdateCertificate}
+                        disabled={
+                          isSavingCert ||
+                          loadingSecrets ||
+                          !certSecretName.trim() ||
+                          (certSecretName.trim() === (domain?.tlsSecretName || '') &&
+                            certSecretNamespace === (domain?.tlsSecretNamespace || 'fastgateway-system'))
+                        }
+                      >
+                        {isSavingCert ? 'Updating...' : 'Update Certificate'}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
 
