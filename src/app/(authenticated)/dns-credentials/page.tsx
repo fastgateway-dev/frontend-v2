@@ -128,6 +128,7 @@ export default function DNSCredentialsPage() {
   };
 
   const currentFields = PROVIDERS[providerType]?.fields || [];
+  const isMultiFieldProvider = currentFields.length > 1;
 
   const buildCredentials = (): Record<string, string> => {
     const result: Record<string, string> = {};
@@ -146,10 +147,20 @@ export default function DNSCredentialsPage() {
       errors.name = 'Name is required';
     }
     if (!editing) {
+      // Create mode: the backend requires every field for the provider, so
+      // validate that up front rather than letting it 400.
       for (const field of currentFields) {
         if (!fieldValues[field.key]?.trim()) {
           errors[field.key] = `${field.label} is required`;
         }
+      }
+    } else if (isMultiFieldProvider) {
+      // Edit mode for multi-field providers: credential changes are all-or-nothing,
+      // since the backend validates the whole credentials map on update.
+      const filledCount = currentFields.filter((field) => fieldValues[field.key]?.trim()).length;
+      if (filledCount > 0 && filledCount < currentFields.length) {
+        errors.credentials =
+          'Enter all fields to update credentials, or leave them all blank to keep the current ones.';
       }
     }
     setFormErrors(errors);
@@ -333,6 +344,18 @@ export default function DNSCredentialsPage() {
             disabled={!!editing}
           />
 
+          {editing && isMultiFieldProvider && (
+            <div>
+              <p className="text-xs text-gray-500">
+                To change credentials for this provider, re-enter all fields. Leave them all
+                blank to keep the current credentials.
+              </p>
+              {formErrors.credentials && (
+                <p className="text-xs text-red-600 mt-1">{formErrors.credentials}</p>
+              )}
+            </div>
+          )}
+
           {currentFields.map((field) => (
             <div key={field.key}>
               <Input
@@ -342,14 +365,18 @@ export default function DNSCredentialsPage() {
                 onChange={(e) => handleFieldChange(field.key, e.target.value)}
                 placeholder={
                   editing
-                    ? field.type === 'password'
-                      ? '••••••••'
-                      : 'Leave blank to keep current value'
+                    ? isMultiFieldProvider
+                      ? field.type === 'password'
+                        ? '••••••••'
+                        : `Enter ${field.label.toLowerCase()}`
+                      : field.type === 'password'
+                        ? '••••••••'
+                        : 'Leave blank to keep current value'
                     : `Enter ${field.label.toLowerCase()}`
                 }
                 error={formErrors[field.key]}
               />
-              {editing && (
+              {editing && !isMultiFieldProvider && (
                 <p className="text-xs text-gray-500 mt-1">
                   Leave blank to keep the current value
                 </p>
