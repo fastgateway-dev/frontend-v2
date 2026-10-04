@@ -3,13 +3,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Plus, Route as RouteIcon, Rocket, Info, Search, Shield } from 'lucide-react';
+import { ArrowLeft, Plus, Route as RouteIcon, Rocket, Info, Search, Shield, Globe } from 'lucide-react';
 import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent, Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui';
 import { domainsApi, routesApi, permissionsApi, projectsApi } from '@/lib/api';
 import { MetricsTab } from '@/components/metrics/MetricsTab';
 import { NewRouteModal } from '@/components/NewRouteModal';
 import { aiApi } from '@/lib/api/ai';
-import type { Domain, Route, Project, ProjectPermissions, DomainSettings } from '@/types';
+import { dnsRecordsApi } from '@/lib/api/dns-records';
+import { dnsRecordStatusBadge } from '@/lib/utils/dns';
+import type { Domain, Route, Project, ProjectPermissions, DomainSettings, DomainDNSRecord } from '@/types';
 
 export default function DomainDetailPage() {
   const params = useParams();
@@ -26,6 +28,9 @@ export default function DomainDetailPage() {
 
   // Domain Settings state
   const [domainSettings, setDomainSettings] = useState<DomainSettings | null>(null);
+
+  // DNS Record state (read-only)
+  const [dnsRecord, setDnsRecord] = useState<DomainDNSRecord | null>(null);
 
   // YAML manifest state
   const [gatewayYaml, setGatewayYaml] = useState('');
@@ -50,7 +55,7 @@ export default function DomainDetailPage() {
 
   const loadData = async () => {
     try {
-      const [domainData, routesData, permsData, settingsData, yamlsData, aiStatus, projectData] = await Promise.all([
+      const [domainData, routesData, permsData, settingsData, yamlsData, aiStatus, projectData, dnsRecordData] = await Promise.all([
         domainsApi.get(projectId, domainId),
         routesApi.list(projectId, domainId),
         permissionsApi.getProjectPermissions(projectId),
@@ -58,11 +63,13 @@ export default function DomainDetailPage() {
         domainsApi.getYamls(projectId, domainId).catch(() => null),
         aiApi.getStatus().catch(() => ({ enabled: false })),
         projectsApi.get(projectId).catch(() => null),
+        dnsRecordsApi.get(projectId, domainId).catch(() => null),
       ]);
       setDomain(domainData);
       setRoutes(routesData.data);
       setPermissions(permsData);
       setProject(projectData);
+      setDnsRecord(dnsRecordData);
       if (settingsData) {
         setDomainSettings(settingsData);
       }
@@ -414,7 +421,7 @@ export default function DomainDetailPage() {
                 };
 
                 return (
-                  <Accordion type="multiple" defaultValue={['tls-certificate', 'client-settings', 'backend-settings', 'extensions']}>
+                  <Accordion type="multiple" defaultValue={['tls-certificate', 'dns-record', 'client-settings', 'backend-settings', 'extensions']}>
                     {/* TLS Certificate (read-only) — the secret this domain serves.
                         Edit it from the "Edit Settings" button above. */}
                     {domain?.tlsMode !== 'no_tls' && (
@@ -442,6 +449,47 @@ export default function DomainDetailPage() {
                               <span className="text-sm text-gray-500">Namespace</span>
                               <p className="text-sm font-medium text-gray-900 mt-0.5">{domain?.tlsSecretNamespace || 'fastgateway-system'}</p>
                             </div>
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    )}
+
+                    {/* DNS Record (read-only) — the DNS record FastGateway manages
+                        for this domain's hostname. Edit it from the "Edit Settings"
+                        button above. */}
+                    {domain?.tlsMode !== 'no_tls' && (
+                      <AccordionItem value="dns-record">
+                        <AccordionTrigger value="dns-record">
+                          <div className="flex items-center gap-2">
+                            <Globe className="h-4 w-4" />
+                            <span>DNS Record</span>
+                            {dnsRecord && (
+                              <Badge variant={dnsRecordStatusBadge(dnsRecord.status).variant}>
+                                {dnsRecordStatusBadge(dnsRecord.status).label}
+                              </Badge>
+                            )}
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent value="dns-record">
+                          <div className="p-3 space-y-3">
+                            {dnsRecord ? (
+                              <>
+                                <div>
+                                  <span className="text-sm text-gray-500">Hostname</span>
+                                  <p className="text-sm font-medium text-gray-900 break-all mt-0.5">{domain?.hostname}</p>
+                                </div>
+                                {renderValue('Record Type', dnsRecord.recordType)}
+                                {renderValue('Resolved Target', dnsRecord.resolvedTarget)}
+                                {renderValue('Provider Credential', dnsRecord.providerCredentialId)}
+                                {renderValue('TTL', dnsRecord.ttl)}
+                                {renderValue('Proxied', dnsRecord.proxied)}
+                                {dnsRecord.status === 'error' && dnsRecord.statusMessage && (
+                                  <p className="text-sm text-red-600">{dnsRecord.statusMessage}</p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-sm text-gray-400">Not managed by FastGateway</p>
+                            )}
                           </div>
                         </AccordionContent>
                       </AccordionItem>

@@ -3,10 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Plus, AlertTriangle, Info, X, Shield, Trash2, Upload, Sparkles, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Plus, AlertTriangle, Info, X, Shield, Trash2, Upload, Sparkles, MessageSquare, Globe } from 'lucide-react';
 import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent, Accordion, AccordionItem, AccordionTrigger, AccordionContent, Input, InfoTooltip, Select } from '@/components/ui';
 import { domainsApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
+import { dnsRecordsApi } from '@/lib/api/dns-records';
+import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
+import { dnsRecordStatusBadge } from '@/lib/utils/dns';
 import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { AIReviewCard } from '@/components/features/ai-review-card';
 import { YamlDiffViewer } from '@/components/features/yaml-diff-viewer';
@@ -16,7 +19,7 @@ import ResponseOverrideForm from '@/components/ResponseOverrideForm';
 import LuaExtensionForm from '@/components/LuaExtensionForm';
 import WasmExtensionForm from '@/components/WasmExtensionForm';
 import ExtProcExtensionForm from '@/components/ExtProcExtensionForm';
-import type { Domain, DomainSettings, TLSProfile, TLSSecretInfo, MTLSCACert, MTLSSANEntry, AIReviewResult, AIChatContext, CompressionType, LoadBalancerType, ConsistentHashType, RetryConfig, RetryOn, PerRetryPolicy, BackOffPolicy, CircuitBreakerConfig, RequestBufferConfig, ResponseOverrideRule, BTPTimeoutConfig, BackendTrafficPolicyConfig, EnvoyExtensionPolicyConfig, LuaExtensionConfig, WasmExtensionConfig, ExtProcExtensionConfig } from '@/types';
+import type { Domain, DomainSettings, TLSProfile, TLSSecretInfo, MTLSCACert, MTLSSANEntry, AIReviewResult, AIChatContext, CompressionType, LoadBalancerType, ConsistentHashType, RetryConfig, RetryOn, PerRetryPolicy, BackOffPolicy, CircuitBreakerConfig, RequestBufferConfig, ResponseOverrideRule, BTPTimeoutConfig, BackendTrafficPolicyConfig, EnvoyExtensionPolicyConfig, LuaExtensionConfig, WasmExtensionConfig, ExtProcExtensionConfig, DomainDNSRecord, DNSRecordType, DNSRecordInput } from '@/types';
 
 // TLS Profile presets
 const TLS_PROFILES: Record<TLSProfile, { label: string; description: string; minVersion: string; maxVersion: string; ciphers: string[] }> = {
@@ -80,6 +83,22 @@ export default function DomainSettingsPage() {
   const [isSavingCert, setIsSavingCert] = useState(false);
   const [certError, setCertError] = useState<string | null>(null);
   const [certSaved, setCertSaved] = useState(false);
+
+  // DNS Record (domain-level DNS record FastGateway manages for the hostname)
+  // state. This is saved via its own dnsRecordsApi actions (enable/update/
+  // refresh/remove), separate from the "Save Settings" button, since each
+  // action applies a live DNS provider change immediately.
+  const [dnsRecord, setDnsRecord] = useState<DomainDNSRecord | null>(null);
+  const [activeDnsCredentialId, setActiveDnsCredentialId] = useState<string | null>(null);
+  const [dnsRecordType, setDnsRecordType] = useState<DNSRecordType>('auto');
+  const [dnsTtl, setDnsTtl] = useState('');
+  const [dnsProxied, setDnsProxied] = useState(false);
+  const [isEnablingDns, setIsEnablingDns] = useState(false);
+  const [isSavingDns, setIsSavingDns] = useState(false);
+  const [isRefreshingDns, setIsRefreshingDns] = useState(false);
+  const [isDeletingDns, setIsDeletingDns] = useState(false);
+  const [dnsError, setDnsError] = useState<string | null>(null);
+  const [dnsSaved, setDnsSaved] = useState<string | null>(null);
 
   // Client Connection state
   const [tcpKeepaliveEnabled, setTcpKeepaliveEnabled] = useState(false);
@@ -274,19 +293,107 @@ export default function DomainSettingsPage() {
     }
   };
 
+  // DNS Record: own actions, independent of the generic "Save Settings" flow.
+  const applyDnsRecordToForm = (record: DomainDNSRecord) => {
+    setDnsRecord(record);
+    setDnsRecordType(record.recordType);
+    setDnsTtl(record.ttl?.toString() ?? '');
+    setDnsProxied(record.proxied);
+  };
+
+  const buildDnsRecordInput = (): DNSRecordInput => ({
+    providerCredentialId: activeDnsCredentialId || undefined,
+    recordType: dnsRecordType,
+    ttl: dnsTtl ? parseInt(dnsTtl, 10) : undefined,
+    proxied: dnsProxied,
+  });
+
+  const handleEnableDns = async () => {
+    setIsEnablingDns(true);
+    setDnsError(null);
+    setDnsSaved(null);
+    try {
+      const record = await dnsRecordsApi.enable(projectId, domainId, buildDnsRecordInput());
+      applyDnsRecordToForm(record);
+      setDnsSaved('DNS record enabled.');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      setDnsError(err.response?.data?.error || 'Failed to enable DNS record');
+    } finally {
+      setIsEnablingDns(false);
+    }
+  };
+
+  const handleSaveDns = async () => {
+    setIsSavingDns(true);
+    setDnsError(null);
+    setDnsSaved(null);
+    try {
+      const record = await dnsRecordsApi.update(projectId, domainId, buildDnsRecordInput());
+      applyDnsRecordToForm(record);
+      setDnsSaved('DNS record updated.');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      setDnsError(err.response?.data?.error || 'Failed to update DNS record');
+    } finally {
+      setIsSavingDns(false);
+    }
+  };
+
+  const handleRefreshDns = async () => {
+    setIsRefreshingDns(true);
+    setDnsError(null);
+    setDnsSaved(null);
+    try {
+      const record = await dnsRecordsApi.refresh(projectId, domainId);
+      applyDnsRecordToForm(record);
+      setDnsSaved('DNS record refreshed.');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      setDnsError(err.response?.data?.error || 'Failed to refresh DNS record');
+    } finally {
+      setIsRefreshingDns(false);
+    }
+  };
+
+  const handleDeleteDns = async () => {
+    if (!confirm('Are you sure you want to delete this DNS record?')) return;
+    setIsDeletingDns(true);
+    setDnsError(null);
+    setDnsSaved(null);
+    try {
+      await dnsRecordsApi.remove(projectId, domainId);
+      setDnsRecord(null);
+      setDnsSaved('DNS record deleted.');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      setDnsError(err.response?.data?.error || 'Failed to delete DNS record');
+    } finally {
+      setIsDeletingDns(false);
+    }
+  };
+
   const loadData = async () => {
     try {
-      const [domainData, settingsData, yamlsData, aiStatus] = await Promise.all([
+      const [domainData, settingsData, yamlsData, aiStatus, activeCredentialResult, dnsRecordResult] = await Promise.all([
         domainsApi.get(projectId, domainId),
         domainsApi.getSettings(projectId, domainId).catch(() => null),
         domainsApi.getYamls(projectId, domainId).catch(() => null),
         aiApi.getStatus().catch(() => ({ enabled: false })),
+        dnsCredentialsApi.getActiveCredential().catch(() => ({ credentialId: null })),
+        dnsRecordsApi.get(projectId, domainId).catch(() => null),
       ]);
 
       setDomain(domainData);
       setCertSecretName(domainData.tlsSecretName || '');
       setCertSecretNamespace(domainData.tlsSecretNamespace || 'fastgateway-system');
       setAiEnabled(aiStatus.enabled);
+      setActiveDnsCredentialId(activeCredentialResult.credentialId);
+      if (dnsRecordResult) {
+        applyDnsRecordToForm(dnsRecordResult);
+      } else {
+        setDnsRecord(null);
+      }
 
       if (settingsData) {
         setDomainSettings(settingsData);
@@ -900,7 +1007,7 @@ export default function DomainSettingsPage() {
                 </div>
               )}
 
-              <Accordion type="multiple" defaultValue={['tls-certificate', 'client-settings', 'backend-settings', 'extensions']}>
+              <Accordion type="multiple" defaultValue={['tls-certificate', 'dns-record', 'client-settings', 'backend-settings', 'extensions']}>
                 {/* TLS Certificate — the secret the Gateway serves for this domain.
                     A top-level section (like Client/Backend/Extensions). Saved via
                     domainsApi.update (its own action), separate from the "Save
@@ -995,6 +1102,144 @@ export default function DomainSettingsPage() {
                       </AccordionContent>
                     </AccordionItem>
                   )}
+
+                {/* DNS Record — the DNS record FastGateway manages for this
+                    domain's hostname. A top-level section (like TLS
+                    Certificate). Saved via its own dnsRecordsApi actions
+                    (its own buttons below), separate from the "Save
+                    Settings" button, since each action applies a live DNS
+                    provider change immediately. */}
+                {needsTLS && (
+                  <AccordionItem value="dns-record">
+                    <AccordionTrigger value="dns-record">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4" />
+                        <span>DNS Record</span>
+                        {dnsRecord && (
+                          <Badge variant={dnsRecordStatusBadge(dnsRecord.status).variant}>
+                            {dnsRecordStatusBadge(dnsRecord.status).label}
+                          </Badge>
+                        )}
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent value="dns-record">
+                      <div className="space-y-4 p-3">
+                        <p className="text-xs text-gray-500">
+                          Manage the DNS record FastGateway creates and keeps in sync for this domain&apos;s hostname.
+                        </p>
+
+                        {!activeDnsCredentialId ? (
+                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <p className="text-sm text-amber-800">
+                              No active DNS provider credential is configured.{' '}
+                              <Link href="/dns-credentials" className="underline font-medium">
+                                Set one up in DNS Credentials
+                              </Link>{' '}
+                              before DNS management can be enabled for this domain.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-w-2xl">
+                            <Select
+                              id="dnsRecordType"
+                              label="Record Type"
+                              value={dnsRecordType}
+                              onChange={(e) => setDnsRecordType(e.target.value as DNSRecordType)}
+                              options={[
+                                { value: 'auto', label: 'Auto' },
+                                { value: 'A', label: 'A' },
+                                { value: 'AAAA', label: 'AAAA' },
+                                { value: 'CNAME', label: 'CNAME' },
+                              ]}
+                            />
+
+                            <div>
+                              <label htmlFor="dnsTtl" className="block text-sm font-medium text-gray-700 mb-1">
+                                TTL
+                              </label>
+                              <Input
+                                id="dnsTtl"
+                                type="number"
+                                min={0}
+                                placeholder="Auto"
+                                value={dnsTtl}
+                                onChange={(e) => setDnsTtl(e.target.value)}
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                id="dnsProxied"
+                                checked={dnsProxied}
+                                onChange={(e) => setDnsProxied(e.target.checked)}
+                                className="h-4 w-4 rounded border-gray-300 text-primary-600"
+                              />
+                              <label htmlFor="dnsProxied" className="text-sm font-medium text-gray-700">
+                                Proxied
+                              </label>
+                            </div>
+
+                            {dnsRecord && (
+                              <div className="pt-2 border-t space-y-1">
+                                <div className="flex justify-between py-1">
+                                  <span className="text-sm text-gray-500">Resolved Target</span>
+                                  <span className="text-sm font-medium text-gray-900">{dnsRecord.resolvedTarget || 'None'}</span>
+                                </div>
+                                {dnsRecord.status === 'error' && dnsRecord.statusMessage && (
+                                  <p className="text-sm text-red-600">{dnsRecord.statusMessage}</p>
+                                )}
+                              </div>
+                            )}
+
+                            {dnsError && (
+                              <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+                                {dnsError}
+                              </div>
+                            )}
+                            {dnsSaved && (
+                              <div className="p-3 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm">
+                                {dnsSaved}
+                              </div>
+                            )}
+
+                            <div className="flex justify-end gap-2">
+                              {dnsRecord && (
+                                <Button
+                                  variant="secondary"
+                                  onClick={handleRefreshDns}
+                                  disabled={isRefreshingDns || isSavingDns || isDeletingDns}
+                                >
+                                  {isRefreshingDns ? 'Refreshing...' : 'Refresh'}
+                                </Button>
+                              )}
+                              {dnsRecord && (
+                                <Button
+                                  variant="secondary"
+                                  onClick={handleDeleteDns}
+                                  disabled={isDeletingDns || isSavingDns || isRefreshingDns}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-1" />
+                                  {isDeletingDns ? 'Deleting...' : 'Delete'}
+                                </Button>
+                              )}
+                              {dnsRecord ? (
+                                <Button onClick={handleSaveDns} disabled={isSavingDns || isRefreshingDns || isDeletingDns}>
+                                  {isSavingDns ? 'Saving...' : 'Save'}
+                                </Button>
+                              ) : (
+                                <Button onClick={handleEnableDns} disabled={isEnablingDns}>
+                                  {isEnablingDns ? 'Enabling...' : 'Enable'}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                )}
 
                 {/* Client Settings Group */}
                 <AccordionItem value="client-settings">
