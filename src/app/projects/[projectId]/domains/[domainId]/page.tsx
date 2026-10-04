@@ -414,7 +414,39 @@ export default function DomainDetailPage() {
                 };
 
                 return (
-                  <Accordion type="multiple" defaultValue={['client-settings', 'backend-settings', 'extensions']}>
+                  <Accordion type="multiple" defaultValue={['tls-certificate', 'client-settings', 'backend-settings', 'extensions']}>
+                    {/* TLS Certificate (read-only) — the secret this domain serves.
+                        Edit it from the "Edit Settings" button above. */}
+                    {domain?.tlsMode !== 'no_tls' && (
+                      <AccordionItem value="tls-certificate">
+                        <AccordionTrigger value="tls-certificate">
+                          <div className="flex items-center gap-2">
+                            <Shield className="h-4 w-4" />
+                            <span>TLS Certificate</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent value="tls-certificate">
+                          <div className="p-3 space-y-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-gray-500">Secret Name</span>
+                                {domain?.tlsSecretName && (
+                                  <Badge variant={domain.tlsSecretName.startsWith('cert-') ? 'success' : 'default'}>
+                                    {domain.tlsSecretName.startsWith('cert-') ? 'Managed' : 'External'}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm font-medium text-gray-900 break-all mt-0.5">{domain?.tlsSecretName || 'None'}</p>
+                            </div>
+                            <div>
+                              <span className="text-sm text-gray-500">Namespace</span>
+                              <p className="text-sm font-medium text-gray-900 mt-0.5">{domain?.tlsSecretNamespace || 'fastgateway-system'}</p>
+                            </div>
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    )}
+
                     {/* Client Settings Group */}
                     <AccordionItem value="client-settings">
                       <AccordionTrigger value="client-settings">Client Settings</AccordionTrigger>

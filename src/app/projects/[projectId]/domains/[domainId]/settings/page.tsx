@@ -900,21 +900,26 @@ export default function DomainSettingsPage() {
                 </div>
               )}
 
-              {/* TLS Certificate — the secret the Gateway serves for this domain.
-                  Saved via domainsApi.update (its own action), separate from the
-                  ClientTrafficPolicy "Save Settings" below, since it applies a
-                  live Gateway listener change immediately. */}
-              {needsTLS && (
-                <div className="mb-6 p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Shield className="h-4 w-4 text-gray-500" />
-                    <h3 className="text-sm font-semibold text-gray-900">TLS Certificate</h3>
-                  </div>
-                  <p className="text-xs text-gray-500 mb-4">
-                    The certificate this domain serves. Select a managed certificate or an existing TLS secret to change it.
-                  </p>
-
-                  <div className="space-y-3 max-w-2xl">
+              <Accordion type="multiple" defaultValue={['tls-certificate', 'client-settings', 'backend-settings', 'extensions']}>
+                {/* TLS Certificate — the secret the Gateway serves for this domain.
+                    A top-level section (like Client/Backend/Extensions). Saved via
+                    domainsApi.update (its own action), separate from the "Save
+                    Settings" button, since it applies a live Gateway listener
+                    change immediately. */}
+                {needsTLS && (
+                  <AccordionItem value="tls-certificate">
+                    <AccordionTrigger value="tls-certificate">
+                      <div className="flex items-center gap-2">
+                        <Shield className="h-4 w-4" />
+                        <span>TLS Certificate</span>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent value="tls-certificate">
+                      <div className="space-y-4 p-3">
+                        <p className="text-xs text-gray-500">
+                          The certificate this domain serves. Select a managed certificate or an existing TLS secret to change it.
+                        </p>
+                        <div className="space-y-3 max-w-2xl">
                     {(() => {
                       // Always include the domain's current namespace as an option,
                       // even if it is no longer in the project's managed list, so the
@@ -986,10 +991,11 @@ export default function DomainSettingsPage() {
                       </Button>
                     </div>
                   </div>
-                </div>
-              )}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )}
 
-              <Accordion type="multiple" defaultValue={['client-settings', 'backend-settings', 'extensions']}>
                 {/* Client Settings Group */}
                 <AccordionItem value="client-settings">
                   <AccordionTrigger value="client-settings">
