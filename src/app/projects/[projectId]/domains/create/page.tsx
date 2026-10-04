@@ -10,8 +10,9 @@ import { AIReviewCard } from '@/components/features/ai-review-card';
 import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { domainsApi, domainTemplatesApi, projectsApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
+import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
 import { LabelsEditor } from '@/components/ui/labels-editor';
-import type { Project, DomainTemplate, AIReviewResult, TLSSecretInfo } from '@/types';
+import type { Project, DomainTemplate, AIReviewResult, TLSSecretInfo, DNSRecordType } from '@/types';
 
 export default function CreateDomainPage() {
   const params = useParams();
@@ -37,6 +38,13 @@ export default function CreateDomainPage() {
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [domainNamespace, setDomainNamespace] = useState('fastgateway-system');
   const [availableDomainNamespaces, setAvailableDomainNamespaces] = useState<string[]>(['fastgateway-system']);
+
+  // DNS auto-create state
+  const [activeDnsCredentialId, setActiveDnsCredentialId] = useState<string | null>(null);
+  const [dnsEnabled, setDnsEnabled] = useState(false);
+  const [dnsRecordType, setDnsRecordType] = useState<DNSRecordType>('auto');
+  const [dnsTtl, setDnsTtl] = useState('');
+  const [dnsProxied, setDnsProxied] = useState(false);
 
   // Submit state
   const [isCreating, setIsCreating] = useState(false);
@@ -101,14 +109,16 @@ export default function CreateDomainPage() {
 
   const loadData = async () => {
     try {
-      const [projectData, templatesData, nsData] = await Promise.all([
+      const [projectData, templatesData, nsData, activeCredentialResult] = await Promise.all([
         projectsApi.get(projectId),
         domainTemplatesApi.list(projectId),
         domainsApi.listAvailableNamespaces(projectId).catch(() => ({ namespaces: ['fastgateway-system'] })),
+        dnsCredentialsApi.getActiveCredential().catch(() => ({ credentialId: null })),
       ]);
       setProject(projectData);
       setDomainTemplates(templatesData.data);
       setAvailableDomainNamespaces(nsData.namespaces);
+      setActiveDnsCredentialId(activeCredentialResult.credentialId);
 
       aiApi.getStatus().then(status => setAiEnabled(status.enabled)).catch(() => {});
     } catch (error) {
@@ -147,6 +157,7 @@ export default function CreateDomainPage() {
     tlsSecretNamespace: needsTLS && tlsSecretNamespace !== 'fastgateway-system' ? tlsSecretNamespace : undefined,
     ...(domainNamespace !== 'fastgateway-system' ? { namespace: domainNamespace } : {}),
     labels: Object.keys(labels).length > 0 ? labels : undefined,
+    ...(dnsEnabled ? { dns: { enabled: true, recordType: dnsRecordType, ttl: dnsTtl ? Number(dnsTtl) : undefined, proxied: dnsProxied } } : {}),
   });
 
   // Load preview when switching to Preview tab — only if all required fields are valid.
@@ -409,6 +420,84 @@ export default function CreateDomainPage() {
                             <p className="mt-1 text-sm text-amber-600">{secretWarning}</p>
                           )}
                         </div>
+                      </div>
+                    )}
+
+                    {needsTLS && (
+                      <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            id="dnsEnabled"
+                            checked={dnsEnabled}
+                            disabled={!activeDnsCredentialId}
+                            onChange={(e) => setDnsEnabled(e.target.checked)}
+                            className="h-4 w-4 mt-0.5 rounded border-gray-300 text-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                          <label htmlFor="dnsEnabled" className="text-sm font-medium text-gray-700">
+                            Automatically create the DNS record for this domain
+                          </label>
+                        </div>
+
+                        {!activeDnsCredentialId ? (
+                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <p className="text-sm text-amber-800">
+                              No active DNS provider credential is configured.{' '}
+                              <Link href="/dns-credentials" className="underline font-medium">
+                                Set one up in DNS Credentials
+                              </Link>{' '}
+                              before DNS management can be enabled.
+                            </p>
+                          </div>
+                        ) : dnsEnabled && (
+                          <div className="space-y-3 pl-7">
+                            <p className="text-xs text-gray-500">
+                              A DNS record will be created and kept in sync for{' '}
+                              <span className="font-medium text-gray-700">{hostname || 'this hostname'}</span>.
+                            </p>
+
+                            <Select
+                              id="dnsRecordType"
+                              label="Record Type"
+                              value={dnsRecordType}
+                              onChange={(e) => setDnsRecordType(e.target.value as DNSRecordType)}
+                              options={[
+                                { value: 'auto', label: 'Auto' },
+                                { value: 'A', label: 'A' },
+                                { value: 'AAAA', label: 'AAAA' },
+                                { value: 'CNAME', label: 'CNAME' },
+                              ]}
+                            />
+
+                            <div>
+                              <label htmlFor="dnsTtl" className="block text-sm font-medium text-gray-700 mb-1">
+                                TTL
+                              </label>
+                              <Input
+                                id="dnsTtl"
+                                type="number"
+                                min={0}
+                                placeholder="Auto"
+                                value={dnsTtl}
+                                onChange={(e) => setDnsTtl(e.target.value)}
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                id="dnsProxied"
+                                checked={dnsProxied}
+                                onChange={(e) => setDnsProxied(e.target.checked)}
+                                className="h-4 w-4 rounded border-gray-300 text-primary-600"
+                              />
+                              <label htmlFor="dnsProxied" className="text-sm font-medium text-gray-700">
+                                Proxied
+                              </label>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
