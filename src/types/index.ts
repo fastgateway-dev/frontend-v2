@@ -276,6 +276,7 @@ export interface CreateDomainInput {
   tlsSecretNamespace?: string;
   namespace?: string;
   labels?: Record<string, string>;
+  dns?: { enabled: boolean; providerCredentialId?: string; recordType?: DNSRecordType; ttl?: number; proxied?: boolean };
 }
 
 export interface TLSSecretInfo {
@@ -2052,6 +2053,33 @@ export interface CertificateDistribution {
   lastSyncedAt?: string;
 }
 
+// DNS Record types
+export type DNSRecordStatus = 'pending' | 'syncing' | 'ready' | 'error';
+export type DNSRecordType = 'auto' | 'A' | 'AAAA' | 'CNAME';
+
+export interface DomainDNSRecord {
+  id: string;
+  domainId: string;
+  providerCredentialId: string;
+  recordType: DNSRecordType;
+  ttl?: number;
+  proxied: boolean;
+  resolvedTarget?: string;
+  status: DNSRecordStatus;
+  statusMessage?: string;
+  endpointName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DNSRecordInput {
+  providerCredentialId?: string;
+  recordType?: DNSRecordType;
+  ttl?: number;
+  proxied?: boolean;
+}
+
+// DNS Credential types
 export interface DNSProviderCredential {
   id: string;
   name: string;
@@ -2059,8 +2087,8 @@ export interface DNSProviderCredential {
   createdAt: string;
   updatedAt: string;
 }
-export interface CreateDNSCredentialInput { name: string; providerType: string; credentials: { apiToken: string }; }
-export interface UpdateDNSCredentialInput { name?: string; credentials?: { apiToken: string }; }
+export interface CreateDNSCredentialInput { name: string; providerType: string; credentials: Record<string, string>; }
+export interface UpdateDNSCredentialInput { name?: string; credentials?: Record<string, string>; }
 
 export type CreateIssuerInput =
   | { type: 'self_signed_ca'; name: string; commonName: string; keyAlgorithm: string; keySize: number; durationDays: number }
