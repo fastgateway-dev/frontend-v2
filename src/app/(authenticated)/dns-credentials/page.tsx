@@ -6,10 +6,50 @@ import { Button, Card, CardContent, Badge, Modal, Input, Select } from '@/compon
 import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
 import type { DNSProviderCredential } from '@/types';
 
-const providerOptions = [{ value: 'cloudflare', label: 'Cloudflare' }];
+interface ProviderField {
+  key: string;
+  label: string;
+  type?: string;
+}
+
+const PROVIDERS: Record<string, { label: string; fields: ProviderField[] }> = {
+  cloudflare: {
+    label: 'Cloudflare',
+    fields: [{ key: 'apiToken', label: 'API Token', type: 'password' }],
+  },
+  route53: {
+    label: 'AWS Route53',
+    fields: [
+      { key: 'accessKeyId', label: 'Access Key ID' },
+      { key: 'secretAccessKey', label: 'Secret Access Key', type: 'password' },
+    ],
+  },
+  google: {
+    label: 'Google Cloud DNS',
+    fields: [
+      { key: 'serviceAccountKey', label: 'Service Account JSON', type: 'password' },
+      { key: 'project', label: 'Project ID' },
+    ],
+  },
+  azure: {
+    label: 'Azure DNS',
+    fields: [
+      { key: 'tenantId', label: 'Tenant ID' },
+      { key: 'subscriptionId', label: 'Subscription ID' },
+      { key: 'resourceGroup', label: 'Resource Group' },
+      { key: 'clientId', label: 'Client ID' },
+      { key: 'clientSecret', label: 'Client Secret', type: 'password' },
+    ],
+  },
+};
+
+const providerOptions = Object.entries(PROVIDERS).map(([value, provider]) => ({
+  value,
+  label: provider.label,
+}));
 
 function getProviderLabel(providerType: string): string {
-  return providerType === 'cloudflare' ? 'Cloudflare' : providerType;
+  return PROVIDERS[providerType]?.label || providerType;
 }
 
 export default function DNSCredentialsPage() {
@@ -21,7 +61,7 @@ export default function DNSCredentialsPage() {
   const [editing, setEditing] = useState<DNSProviderCredential | null>(null);
   const [name, setName] = useState('');
   const [providerType, setProviderType] = useState('cloudflare');
-  const [apiToken, setApiToken] = useState('');
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -49,7 +89,7 @@ export default function DNSCredentialsPage() {
   const resetForm = () => {
     setName('');
     setProviderType('cloudflare');
-    setApiToken('');
+    setFieldValues({});
     setFormErrors({});
     setSaveError(null);
   };
@@ -64,7 +104,7 @@ export default function DNSCredentialsPage() {
     setEditing(credential);
     setName(credential.name);
     setProviderType(credential.providerType);
-    setApiToken('');
+    setFieldValues({});
     setFormErrors({});
     setSaveError(null);
     setShowModal(true);
@@ -76,13 +116,41 @@ export default function DNSCredentialsPage() {
     resetForm();
   };
 
+  const handleProviderChange = (value: string) => {
+    setProviderType(value);
+    // Clear field values so stale fields from the previous provider aren't submitted.
+    setFieldValues({});
+    setFormErrors({});
+  };
+
+  const handleFieldChange = (key: string, value: string) => {
+    setFieldValues((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const currentFields = PROVIDERS[providerType]?.fields || [];
+
+  const buildCredentials = (): Record<string, string> => {
+    const result: Record<string, string> = {};
+    for (const field of currentFields) {
+      const value = fieldValues[field.key];
+      if (value && value.trim()) {
+        result[field.key] = value.trim();
+      }
+    }
+    return result;
+  };
+
   const validate = (): boolean => {
     const errors: Record<string, string> = {};
     if (!name.trim()) {
       errors.name = 'Name is required';
     }
-    if (!editing && !apiToken.trim()) {
-      errors.apiToken = 'API Token is required';
+    if (!editing) {
+      for (const field of currentFields) {
+        if (!fieldValues[field.key]?.trim()) {
+          errors[field.key] = `${field.label} is required`;
+        }
+      }
     }
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -97,15 +165,16 @@ export default function DNSCredentialsPage() {
     setIsSaving(true);
     try {
       if (editing) {
+        const credentials = buildCredentials();
         await dnsCredentialsApi.update(editing.id, {
           name: name.trim(),
-          ...(apiToken.trim() ? { credentials: { apiToken: apiToken.trim() } } : {}),
+          ...(Object.keys(credentials).length > 0 ? { credentials } : {}),
         });
       } else {
         await dnsCredentialsApi.create({
           name: name.trim(),
-          providerType: 'cloudflare',
-          credentials: { apiToken: apiToken.trim() },
+          providerType,
+          credentials: buildCredentials(),
         });
       }
       closeModal();
@@ -259,23 +328,34 @@ export default function DNSCredentialsPage() {
           <Select
             label="Provider"
             value={providerType}
-            onChange={(e) => setProviderType(e.target.value)}
+            onChange={(e) => handleProviderChange(e.target.value)}
             options={providerOptions}
+            disabled={!!editing}
           />
 
-          <Input
-            label="API Token"
-            type="password"
-            value={apiToken}
-            onChange={(e) => setApiToken(e.target.value)}
-            placeholder={editing ? '••••••••' : 'Enter API token'}
-            error={formErrors.apiToken}
-          />
-          {editing && (
-            <p className="text-xs text-gray-500 -mt-3">
-              Leave blank to keep the current token
-            </p>
-          )}
+          {currentFields.map((field) => (
+            <div key={field.key}>
+              <Input
+                label={field.label}
+                type={field.type || 'text'}
+                value={fieldValues[field.key] || ''}
+                onChange={(e) => handleFieldChange(field.key, e.target.value)}
+                placeholder={
+                  editing
+                    ? field.type === 'password'
+                      ? '••••••••'
+                      : 'Leave blank to keep current value'
+                    : `Enter ${field.label.toLowerCase()}`
+                }
+                error={formErrors[field.key]}
+              />
+              {editing && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Leave blank to keep the current value
+                </p>
+              )}
+            </div>
+          ))}
 
           <div className="flex justify-end gap-3 pt-4 border-t">
             <Button variant="secondary" onClick={closeModal}>
