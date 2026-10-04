@@ -157,7 +157,7 @@ export default function CreateDomainPage() {
     tlsSecretNamespace: needsTLS && tlsSecretNamespace !== 'fastgateway-system' ? tlsSecretNamespace : undefined,
     ...(domainNamespace !== 'fastgateway-system' ? { namespace: domainNamespace } : {}),
     labels: Object.keys(labels).length > 0 ? labels : undefined,
-    ...(dnsEnabled ? { dns: { enabled: true, recordType: dnsRecordType, ttl: dnsTtl ? Number(dnsTtl) : undefined, proxied: dnsProxied } } : {}),
+    ...(needsTLS && dnsEnabled ? { dns: { enabled: true, recordType: dnsRecordType, ttl: dnsTtl ? Number(dnsTtl) : undefined, proxied: dnsProxied } } : {}),
   });
 
   // Load preview when switching to Preview tab — only if all required fields are valid.
