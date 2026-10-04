@@ -176,10 +176,10 @@ export default function DNSCredentialsPage() {
     setIsSaving(true);
     try {
       if (editing) {
-        const credentials = buildCredentials();
+        const credentialValues = buildCredentials();
         await dnsCredentialsApi.update(editing.id, {
           name: name.trim(),
-          ...(Object.keys(credentials).length > 0 ? { credentials } : {}),
+          ...(Object.keys(credentialValues).length > 0 ? { credentials: credentialValues } : {}),
         });
       } else {
         await dnsCredentialsApi.create({

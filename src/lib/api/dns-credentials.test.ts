@@ -24,3 +24,16 @@ test('update patches and delete deletes', async () => {
   await dnsCredentialsApi.delete('c1');
   expect(apiClient.delete).toHaveBeenCalledWith('/dns/credentials/c1');
 });
+
+test('getActiveCredential fetches the active credential setting', async () => {
+  (apiClient.get as jest.Mock).mockResolvedValue({ data: { credentialId: 'c1' } });
+  const r = await dnsCredentialsApi.getActiveCredential();
+  expect(apiClient.get).toHaveBeenCalledWith('/dns/settings/active-credential');
+  expect(r).toEqual({ credentialId: 'c1' });
+});
+
+test('setActiveCredential puts the credentialId', async () => {
+  (apiClient.put as jest.Mock).mockResolvedValue({ data: {} });
+  await dnsCredentialsApi.setActiveCredential('c1');
+  expect(apiClient.put).toHaveBeenCalledWith('/dns/settings/active-credential', { credentialId: 'c1' });
+});

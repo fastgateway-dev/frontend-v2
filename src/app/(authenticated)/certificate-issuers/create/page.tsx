@@ -58,7 +58,9 @@ export default function CreateCertificateIssuerPage() {
   useEffect(() => {
     dnsCredentialsApi
       .list()
-      .then(setDnsCredentials)
+      // ACME DNS-01 only supports Cloudflare credentials today; filter out
+      // other providers so users can't select a non-functional credential.
+      .then((creds) => setDnsCredentials(creds.filter((c) => c.providerType === 'cloudflare')))
       .catch(() => setDnsCredentials([]))
       .finally(() => setIsLoadingDnsCredentials(false));
   }, []);
@@ -285,9 +287,10 @@ export default function CreateCertificateIssuerPage() {
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
                     <p className="text-sm text-amber-800">
-                      No DNS credentials available.{' '}
+                      No Cloudflare DNS credentials available — ACME DNS-01 currently supports
+                      Cloudflare only.{' '}
                       <Link href="/dns-credentials" className="underline font-medium">
-                        Add a DNS credential
+                        Add a Cloudflare DNS credential
                       </Link>{' '}
                       before creating an ACME issuer.
                     </p>
