@@ -455,9 +455,10 @@ export default function DomainDetailPage() {
                     )}
 
                     {/* DNS Record (read-only) — the DNS record FastGateway manages
-                        for this domain's hostname. Edit it from the "Edit Settings"
+                        for this domain's hostname. Applies to every domain,
+                        regardless of TLS mode. Edit it from the "Edit Settings"
                         button above. */}
-                    {domain?.tlsMode !== 'no_tls' && (
+                    {domain && (
                       <AccordionItem value="dns-record">
                         <AccordionTrigger value="dns-record">
                           <div className="flex items-center gap-2">

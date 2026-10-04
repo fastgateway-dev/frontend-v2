@@ -157,7 +157,7 @@ export default function CreateDomainPage() {
     tlsSecretNamespace: needsTLS && tlsSecretNamespace !== 'fastgateway-system' ? tlsSecretNamespace : undefined,
     ...(domainNamespace !== 'fastgateway-system' ? { namespace: domainNamespace } : {}),
     labels: Object.keys(labels).length > 0 ? labels : undefined,
-    ...(needsTLS && dnsEnabled ? { dns: { enabled: true, recordType: dnsRecordType, ttl: dnsTtl ? Number(dnsTtl) : undefined, proxied: dnsProxied } } : {}),
+    ...(dnsEnabled ? { dns: { enabled: true, recordType: dnsRecordType, ttl: dnsTtl ? Number(dnsTtl) : undefined, proxied: dnsProxied } } : {}),
   });
 
   // Load preview when switching to Preview tab — only if all required fields are valid.
@@ -423,7 +423,7 @@ export default function CreateDomainPage() {
                       </div>
                     )}
 
-                    {needsTLS && (
+                    {selectedTemplate && (
                       <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
                         <div className="flex items-start gap-3">
                           <input

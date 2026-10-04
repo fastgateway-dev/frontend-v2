@@ -1104,12 +1104,13 @@ export default function DomainSettingsPage() {
                   )}
 
                 {/* DNS Record — the DNS record FastGateway manages for this
-                    domain's hostname. A top-level section (like TLS
-                    Certificate). Saved via its own dnsRecordsApi actions
-                    (its own buttons below), separate from the "Save
-                    Settings" button, since each action applies a live DNS
-                    provider change immediately. */}
-                {needsTLS && (
+                    domain's hostname. Applies to every domain, regardless of
+                    TLS mode. A top-level section (like TLS Certificate).
+                    Saved via its own dnsRecordsApi actions (its own buttons
+                    below), separate from the "Save Settings" button, since
+                    each action applies a live DNS provider change
+                    immediately. */}
+                {domain && (
                   <AccordionItem value="dns-record">
                     <AccordionTrigger value="dns-record">
                       <div className="flex items-center gap-2">
