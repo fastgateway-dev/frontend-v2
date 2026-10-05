@@ -10,8 +10,10 @@ import { MetricsTab } from '@/components/metrics/MetricsTab';
 import { NewRouteModal } from '@/components/NewRouteModal';
 import { aiApi } from '@/lib/api/ai';
 import { dnsRecordsApi } from '@/lib/api/dns-records';
+import { dnsZonesApi } from '@/lib/api/dns-zones';
+import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
 import { dnsRecordStatusBadge } from '@/lib/utils/dns';
-import type { Domain, Route, Project, ProjectPermissions, DomainSettings, DomainDNSRecord } from '@/types';
+import type { Domain, Route, Project, ProjectPermissions, DomainSettings, DomainDNSRecord, DNSHostedZone, DNSProviderCredential } from '@/types';
 
 export default function DomainDetailPage() {
   const params = useParams();
@@ -31,6 +33,8 @@ export default function DomainDetailPage() {
 
   // DNS Record state (read-only)
   const [dnsRecord, setDnsRecord] = useState<DomainDNSRecord | null>(null);
+  const [hostedZones, setHostedZones] = useState<DNSHostedZone[]>([]);
+  const [dnsCredentials, setDnsCredentials] = useState<DNSProviderCredential[]>([]);
 
   // YAML manifest state
   const [gatewayYaml, setGatewayYaml] = useState('');
@@ -55,7 +59,7 @@ export default function DomainDetailPage() {
 
   const loadData = async () => {
     try {
-      const [domainData, routesData, permsData, settingsData, yamlsData, aiStatus, projectData, dnsRecordData] = await Promise.all([
+      const [domainData, routesData, permsData, settingsData, yamlsData, aiStatus, projectData, dnsRecordData, hostedZonesData, dnsCredentialsData] = await Promise.all([
         domainsApi.get(projectId, domainId),
         routesApi.list(projectId, domainId),
         permissionsApi.getProjectPermissions(projectId),
@@ -64,12 +68,16 @@ export default function DomainDetailPage() {
         aiApi.getStatus().catch(() => ({ enabled: false })),
         projectsApi.get(projectId).catch(() => null),
         dnsRecordsApi.get(projectId, domainId).catch(() => null),
+        dnsZonesApi.list().catch(() => []),
+        dnsCredentialsApi.list().catch(() => []),
       ]);
       setDomain(domainData);
       setRoutes(routesData.data);
       setPermissions(permsData);
       setProject(projectData);
       setDnsRecord(dnsRecordData);
+      setHostedZones(hostedZonesData);
+      setDnsCredentials(dnsCredentialsData);
       if (settingsData) {
         setDomainSettings(settingsData);
       }
@@ -481,7 +489,13 @@ export default function DomainDetailPage() {
                                 </div>
                                 {renderValue('Record Type', dnsRecord.recordType)}
                                 {renderValue('Resolved Target', dnsRecord.resolvedTarget)}
-                                {renderValue('Hosted Zone', dnsRecord.hostedZoneId)}
+                                {renderValue('Hosted Zone', (() => {
+                                  const zone = hostedZones.find((z) => z.id === dnsRecord.hostedZoneId);
+                                  if (!zone) return dnsRecord.hostedZoneId;
+                                  const cred = dnsCredentials.find((c) => c.id === zone.providerCredentialId);
+                                  const providerLabel = cred ? cred.providerType : 'unknown provider';
+                                  return `${zone.name} (${providerLabel})`;
+                                })())}
                                 {renderValue('TTL', dnsRecord.ttl)}
                                 {renderValue('Proxied', dnsRecord.proxied)}
                                 {dnsRecord.status === 'error' && dnsRecord.statusMessage && (
