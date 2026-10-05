@@ -276,7 +276,7 @@ export interface CreateDomainInput {
   tlsSecretNamespace?: string;
   namespace?: string;
   labels?: Record<string, string>;
-  dns?: { enabled: boolean; providerCredentialId?: string; recordType?: DNSRecordType; ttl?: number; proxied?: boolean };
+  dns?: { enabled: boolean; hostedZoneId?: string; recordType?: DNSRecordType; ttl?: number; proxied?: boolean };
 }
 
 export interface TLSSecretInfo {
@@ -2079,29 +2079,43 @@ export interface CertificateDistribution {
 }
 
 // DNS Record types
-export type DNSRecordStatus = 'pending' | 'syncing' | 'ready' | 'error';
+export type DNSRecordStatus = 'pending' | 'ready' | 'error';
 export type DNSRecordType = 'auto' | 'A' | 'AAAA' | 'CNAME';
 
 export interface DomainDNSRecord {
   id: string;
   domainId: string;
-  providerCredentialId: string;
+  hostedZoneId: string;
   recordType: DNSRecordType;
   ttl?: number;
   proxied: boolean;
   resolvedTarget?: string;
   status: DNSRecordStatus;
   statusMessage?: string;
-  endpointName?: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface DNSRecordInput {
-  providerCredentialId?: string;
+  hostedZoneId?: string;
   recordType?: DNSRecordType;
   ttl?: number;
   proxied?: boolean;
+}
+
+// DNS Hosted Zone types
+export type DNSZoneStatus = 'pending' | 'ready' | 'error';
+
+export interface DNSHostedZone {
+  id: string;
+  name: string;
+  providerCredentialId: string;
+  status: DNSZoneStatus;
+  statusMessage?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // DNS Credential types

@@ -10,6 +10,7 @@ interface ProviderField {
   key: string;
   label: string;
   type?: string;
+  optional?: boolean;
 }
 
 const PROVIDERS: Record<string, { label: string; fields: ProviderField[] }> = {
@@ -22,6 +23,7 @@ const PROVIDERS: Record<string, { label: string; fields: ProviderField[] }> = {
     fields: [
       { key: 'accessKeyId', label: 'Access Key ID' },
       { key: 'secretAccessKey', label: 'Secret Access Key', type: 'password' },
+      { key: 'region', label: 'Region (optional — defaults to us-east-1)', optional: true },
     ],
   },
   google: {
@@ -29,16 +31,6 @@ const PROVIDERS: Record<string, { label: string; fields: ProviderField[] }> = {
     fields: [
       { key: 'serviceAccountKey', label: 'Service Account JSON', type: 'password' },
       { key: 'project', label: 'Project ID' },
-    ],
-  },
-  azure: {
-    label: 'Azure DNS',
-    fields: [
-      { key: 'tenantId', label: 'Tenant ID' },
-      { key: 'subscriptionId', label: 'Subscription ID' },
-      { key: 'resourceGroup', label: 'Resource Group' },
-      { key: 'clientId', label: 'Client ID' },
-      { key: 'clientSecret', label: 'Client Secret', type: 'password' },
     ],
   },
 };
@@ -150,6 +142,7 @@ export default function DNSCredentialsPage() {
       // Create mode: the backend requires every field for the provider, so
       // validate that up front rather than letting it 400.
       for (const field of currentFields) {
+        if (field.optional) continue;
         if (!fieldValues[field.key]?.trim()) {
           errors[field.key] = `${field.label} is required`;
         }
@@ -157,8 +150,9 @@ export default function DNSCredentialsPage() {
     } else if (isMultiFieldProvider) {
       // Edit mode for multi-field providers: credential changes are all-or-nothing,
       // since the backend validates the whole credentials map on update.
-      const filledCount = currentFields.filter((field) => fieldValues[field.key]?.trim()).length;
-      if (filledCount > 0 && filledCount < currentFields.length) {
+      const requiredFields = currentFields.filter((field) => !field.optional);
+      const filledCount = requiredFields.filter((field) => fieldValues[field.key]?.trim()).length;
+      if (filledCount > 0 && filledCount < requiredFields.length) {
         errors.credentials =
           'Enter all fields to update credentials, or leave them all blank to keep the current ones.';
       }

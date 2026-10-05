@@ -8,8 +8,9 @@ import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsCont
 import { domainsApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
 import { dnsRecordsApi } from '@/lib/api/dns-records';
+import { dnsZonesApi } from '@/lib/api/dns-zones';
 import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
-import { dnsRecordStatusBadge } from '@/lib/utils/dns';
+import { dnsRecordStatusBadge, matchingZonesFor } from '@/lib/utils/dns';
 import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { AIReviewCard } from '@/components/features/ai-review-card';
 import { YamlDiffViewer } from '@/components/features/yaml-diff-viewer';
@@ -19,7 +20,7 @@ import ResponseOverrideForm from '@/components/ResponseOverrideForm';
 import LuaExtensionForm from '@/components/LuaExtensionForm';
 import WasmExtensionForm from '@/components/WasmExtensionForm';
 import ExtProcExtensionForm from '@/components/ExtProcExtensionForm';
-import type { Domain, DomainSettings, TLSProfile, TLSSecretInfo, MTLSCACert, MTLSSANEntry, AIReviewResult, AIChatContext, CompressionType, LoadBalancerType, ConsistentHashType, RetryConfig, RetryOn, PerRetryPolicy, BackOffPolicy, CircuitBreakerConfig, RequestBufferConfig, ResponseOverrideRule, BTPTimeoutConfig, BackendTrafficPolicyConfig, EnvoyExtensionPolicyConfig, LuaExtensionConfig, WasmExtensionConfig, ExtProcExtensionConfig, DomainDNSRecord, DNSRecordType, DNSRecordInput } from '@/types';
+import type { Domain, DomainSettings, TLSProfile, TLSSecretInfo, MTLSCACert, MTLSSANEntry, AIReviewResult, AIChatContext, CompressionType, LoadBalancerType, ConsistentHashType, RetryConfig, RetryOn, PerRetryPolicy, BackOffPolicy, CircuitBreakerConfig, RequestBufferConfig, ResponseOverrideRule, BTPTimeoutConfig, BackendTrafficPolicyConfig, EnvoyExtensionPolicyConfig, LuaExtensionConfig, WasmExtensionConfig, ExtProcExtensionConfig, DomainDNSRecord, DNSRecordType, DNSRecordInput, DNSHostedZone, DNSProviderCredential } from '@/types';
 
 // TLS Profile presets
 const TLS_PROFILES: Record<TLSProfile, { label: string; description: string; minVersion: string; maxVersion: string; ciphers: string[] }> = {
@@ -89,7 +90,9 @@ export default function DomainSettingsPage() {
   // refresh/remove), separate from the "Save Settings" button, since each
   // action applies a live DNS provider change immediately.
   const [dnsRecord, setDnsRecord] = useState<DomainDNSRecord | null>(null);
-  const [activeDnsCredentialId, setActiveDnsCredentialId] = useState<string | null>(null);
+  const [hostedZones, setHostedZones] = useState<DNSHostedZone[]>([]);
+  const [dnsCredentials, setDnsCredentials] = useState<DNSProviderCredential[]>([]);
+  const [selectedHostedZoneId, setSelectedHostedZoneId] = useState<string | null>(null);
   const [dnsRecordType, setDnsRecordType] = useState<DNSRecordType>('auto');
   const [dnsTtl, setDnsTtl] = useState('');
   const [dnsProxied, setDnsProxied] = useState(false);
@@ -301,12 +304,17 @@ export default function DomainSettingsPage() {
     setDnsProxied(record.proxied);
   };
 
-  const buildDnsRecordInput = (): DNSRecordInput => ({
-    providerCredentialId: activeDnsCredentialId || undefined,
-    recordType: dnsRecordType,
-    ttl: dnsTtl ? parseInt(dnsTtl, 10) : undefined,
-    proxied: dnsProxied,
-  });
+  const buildDnsRecordInput = (): DNSRecordInput => {
+    const zone = hostedZones.find((z) => z.id === selectedHostedZoneId);
+    const cred = zone ? dnsCredentials.find((c) => c.id === zone.providerCredentialId) : null;
+    const isCloudflare = cred?.providerType === 'cloudflare';
+    return {
+      hostedZoneId: selectedHostedZoneId || undefined,
+      recordType: dnsRecordType,
+      ttl: dnsTtl ? parseInt(dnsTtl, 10) : undefined,
+      proxied: isCloudflare ? dnsProxied : false,
+    };
+  };
 
   const handleEnableDns = async () => {
     setIsEnablingDns(true);
@@ -375,24 +383,30 @@ export default function DomainSettingsPage() {
 
   const loadData = async () => {
     try {
-      const [domainData, settingsData, yamlsData, aiStatus, activeCredentialResult, dnsRecordResult] = await Promise.all([
+      const [domainData, settingsData, yamlsData, aiStatus, dnsRecordResult, hostedZonesResult, dnsCredentialsResult] = await Promise.all([
         domainsApi.get(projectId, domainId),
         domainsApi.getSettings(projectId, domainId).catch(() => null),
         domainsApi.getYamls(projectId, domainId).catch(() => null),
         aiApi.getStatus().catch(() => ({ enabled: false })),
-        dnsCredentialsApi.getActiveCredential().catch(() => ({ credentialId: null })),
         dnsRecordsApi.get(projectId, domainId).catch(() => null),
+        dnsZonesApi.list().catch(() => []),
+        dnsCredentialsApi.list().catch(() => []),
       ]);
 
       setDomain(domainData);
       setCertSecretName(domainData.tlsSecretName || '');
       setCertSecretNamespace(domainData.tlsSecretNamespace || 'fastgateway-system');
       setAiEnabled(aiStatus.enabled);
-      setActiveDnsCredentialId(activeCredentialResult.credentialId);
+      setHostedZones(hostedZonesResult);
+      setDnsCredentials(dnsCredentialsResult);
+
       if (dnsRecordResult) {
+        setSelectedHostedZoneId(dnsRecordResult.hostedZoneId);
         applyDnsRecordToForm(dnsRecordResult);
       } else {
         setDnsRecord(null);
+        const matches = matchingZonesFor(domainData.hostname, hostedZonesResult);
+        setSelectedHostedZoneId(matches[0]?.id ?? null);
       }
 
       if (settingsData) {
@@ -969,6 +983,32 @@ export default function DomainSettingsPage() {
     );
   }
 
+  // DNS hosted-zone picker: zones registered that cover this domain's
+  // hostname, and the provider behind whichever zone is currently selected.
+  const matchingZones = domain ? matchingZonesFor(domain.hostname, hostedZones) : [];
+  const selectedZone = hostedZones.find((zone) => zone.id === selectedHostedZoneId) ?? null;
+  const selectedZoneCredential = selectedZone
+    ? dnsCredentials.find((cred) => cred.id === selectedZone.providerCredentialId) ?? null
+    : null;
+  const selectedZoneIsCloudflare = selectedZoneCredential?.providerType === 'cloudflare';
+
+  const credentialLabelFor = (zone: DNSHostedZone) => {
+    const cred = dnsCredentials.find((c) => c.id === zone.providerCredentialId);
+    const providerLabel = cred ? cred.providerType : 'unknown provider';
+    return zone.status === 'error'
+      ? `${zone.name} (${providerLabel} - error)`
+      : `${zone.name} (${providerLabel})`;
+  };
+
+  const handleSelectedHostedZoneChange = (zoneId: string) => {
+    setSelectedHostedZoneId(zoneId);
+    const zone = hostedZones.find((z) => z.id === zoneId);
+    const cred = zone ? dnsCredentials.find((c) => c.id === zone.providerCredentialId) : null;
+    if (cred?.providerType !== 'cloudflare') {
+      setDnsProxied(false);
+    }
+  };
+
   return (
     <div className="p-8">
       <Link
@@ -1129,19 +1169,41 @@ export default function DomainSettingsPage() {
                           Manage the DNS record FastGateway creates and keeps in sync for this domain&apos;s hostname.
                         </p>
 
-                        {!activeDnsCredentialId ? (
+                        {hostedZones.length === 0 ? (
                           <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
                             <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
                             <p className="text-sm text-amber-800">
-                              No active DNS provider credential is configured.{' '}
-                              <Link href="/dns-credentials" className="underline font-medium">
-                                Set one up in DNS Credentials
+                              No hosted zones are registered. Register one in{' '}
+                              <Link href="/dns-zones" className="underline font-medium">
+                                Hosted Zones
                               </Link>{' '}
-                              before DNS management can be enabled for this domain.
+                              before enabling DNS for this domain.
+                            </p>
+                          </div>
+                        ) : matchingZones.length === 0 ? (
+                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <p className="text-sm text-amber-800">
+                              No registered hosted zone covers <span className="font-mono">{domain.hostname}</span>.
+                              Register a zone for its apex or a parent domain in{' '}
+                              <Link href="/dns-zones" className="underline font-medium">
+                                Hosted Zones
+                              </Link>.
                             </p>
                           </div>
                         ) : (
                           <div className="space-y-3 max-w-2xl">
+                            <Select
+                              id="dnsHostedZone"
+                              label="Hosted Zone"
+                              value={selectedHostedZoneId ?? ''}
+                              onChange={(e) => handleSelectedHostedZoneChange(e.target.value)}
+                              options={matchingZones.map((zone) => ({
+                                value: zone.id,
+                                label: credentialLabelFor(zone),
+                              }))}
+                            />
+
                             <Select
                               id="dnsRecordType"
                               label="Record Type"
@@ -1166,21 +1228,29 @@ export default function DomainSettingsPage() {
                                 placeholder="Auto"
                                 value={dnsTtl}
                                 onChange={(e) => setDnsTtl(e.target.value)}
+                                disabled={dnsProxied}
                               />
+                              {dnsProxied && (
+                                <p className="mt-1 text-xs text-gray-500">
+                                  TTL is managed automatically by Cloudflare when proxied.
+                                </p>
+                              )}
                             </div>
 
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                id="dnsProxied"
-                                checked={dnsProxied}
-                                onChange={(e) => setDnsProxied(e.target.checked)}
-                                className="h-4 w-4 rounded border-gray-300 text-primary-600"
-                              />
-                              <label htmlFor="dnsProxied" className="text-sm font-medium text-gray-700">
-                                Proxied
-                              </label>
-                            </div>
+                            {selectedZoneIsCloudflare && (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id="dnsProxied"
+                                  checked={dnsProxied}
+                                  onChange={(e) => setDnsProxied(e.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-primary-600"
+                                />
+                                <label htmlFor="dnsProxied" className="text-sm font-medium text-gray-700">
+                                  Proxied
+                                </label>
+                              </div>
+                            )}
 
                             {dnsRecord && (
                               <div className="pt-2 border-t space-y-1">
@@ -1226,11 +1296,11 @@ export default function DomainSettingsPage() {
                                 </Button>
                               )}
                               {dnsRecord ? (
-                                <Button onClick={handleSaveDns} disabled={isSavingDns || isRefreshingDns || isDeletingDns}>
+                                <Button onClick={handleSaveDns} disabled={isSavingDns || isRefreshingDns || isDeletingDns || !selectedHostedZoneId}>
                                   {isSavingDns ? 'Saving...' : 'Save'}
                                 </Button>
                               ) : (
-                                <Button onClick={handleEnableDns} disabled={isEnablingDns}>
+                                <Button onClick={handleEnableDns} disabled={isEnablingDns || !selectedHostedZoneId}>
                                   {isEnablingDns ? 'Enabling...' : 'Enable'}
                                 </Button>
                               )}

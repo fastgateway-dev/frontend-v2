@@ -10,9 +10,11 @@ import { AIReviewCard } from '@/components/features/ai-review-card';
 import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { domainsApi, domainTemplatesApi, projectsApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
+import { dnsZonesApi } from '@/lib/api/dns-zones';
 import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
+import { matchingZonesFor } from '@/lib/utils/dns';
 import { LabelsEditor } from '@/components/ui/labels-editor';
-import type { Project, DomainTemplate, AIReviewResult, TLSSecretInfo, DNSRecordType } from '@/types';
+import type { Project, DomainTemplate, AIReviewResult, TLSSecretInfo, DNSRecordType, DNSHostedZone, DNSProviderCredential } from '@/types';
 
 export default function CreateDomainPage() {
   const params = useParams();
@@ -40,7 +42,9 @@ export default function CreateDomainPage() {
   const [availableDomainNamespaces, setAvailableDomainNamespaces] = useState<string[]>(['fastgateway-system']);
 
   // DNS auto-create state
-  const [activeDnsCredentialId, setActiveDnsCredentialId] = useState<string | null>(null);
+  const [hostedZones, setHostedZones] = useState<DNSHostedZone[]>([]);
+  const [dnsCredentials, setDnsCredentials] = useState<DNSProviderCredential[]>([]);
+  const [selectedHostedZoneId, setSelectedHostedZoneId] = useState<string | null>(null);
   const [dnsEnabled, setDnsEnabled] = useState(false);
   const [dnsRecordType, setDnsRecordType] = useState<DNSRecordType>('auto');
   const [dnsTtl, setDnsTtl] = useState('');
@@ -109,16 +113,18 @@ export default function CreateDomainPage() {
 
   const loadData = async () => {
     try {
-      const [projectData, templatesData, nsData, activeCredentialResult] = await Promise.all([
+      const [projectData, templatesData, nsData, hostedZonesResult, dnsCredentialsResult] = await Promise.all([
         projectsApi.get(projectId),
         domainTemplatesApi.list(projectId),
         domainsApi.listAvailableNamespaces(projectId).catch(() => ({ namespaces: ['fastgateway-system'] })),
-        dnsCredentialsApi.getActiveCredential().catch(() => ({ credentialId: null })),
+        dnsZonesApi.list().catch(() => []),
+        dnsCredentialsApi.list().catch(() => []),
       ]);
       setProject(projectData);
       setDomainTemplates(templatesData.data);
       setAvailableDomainNamespaces(nsData.namespaces);
-      setActiveDnsCredentialId(activeCredentialResult.credentialId);
+      setHostedZones(hostedZonesResult);
+      setDnsCredentials(dnsCredentialsResult);
 
       aiApi.getStatus().then(status => setAiEnabled(status.enabled)).catch(() => {});
     } catch (error) {
@@ -149,6 +155,55 @@ export default function CreateDomainPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, hostname, selectedTemplateId, needsTLS, tlsSecretName]);
 
+  // Hosted-zone picker: zones registered that cover the typed hostname, and
+  // the provider behind whichever zone is currently selected. Reactive to
+  // hostname so the matching set + default selection update as the user
+  // types (mirrors the domain settings page's DNS section).
+  const matchingZones = useMemo(
+    () => matchingZonesFor(hostname.trim(), hostedZones),
+    [hostname, hostedZones]
+  );
+
+  useEffect(() => {
+    const matchingIds = new Set(matchingZones.map((z) => z.id));
+    if (!selectedHostedZoneId || !matchingIds.has(selectedHostedZoneId)) {
+      const newZoneId = matchingZones[0]?.id ?? null;
+      setSelectedHostedZoneId(newZoneId);
+      const newZone = newZoneId ? hostedZones.find((z) => z.id === newZoneId) : null;
+      const newZoneCred = newZone ? dnsCredentials.find((c) => c.id === newZone.providerCredentialId) : null;
+      if (newZoneCred?.providerType !== 'cloudflare') {
+        setDnsProxied(false);
+      }
+    }
+    if (matchingZones.length === 0 && dnsEnabled) {
+      setDnsEnabled(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchingZones]);
+
+  const selectedZone = hostedZones.find((zone) => zone.id === selectedHostedZoneId) ?? null;
+  const selectedZoneCredential = selectedZone
+    ? dnsCredentials.find((cred) => cred.id === selectedZone.providerCredentialId) ?? null
+    : null;
+  const selectedZoneIsCloudflare = selectedZoneCredential?.providerType === 'cloudflare';
+
+  const credentialLabelFor = (zone: DNSHostedZone) => {
+    const cred = dnsCredentials.find((c) => c.id === zone.providerCredentialId);
+    const providerLabel = cred ? cred.providerType : 'unknown provider';
+    return zone.status === 'error'
+      ? `${zone.name} (${providerLabel} - error)`
+      : `${zone.name} (${providerLabel})`;
+  };
+
+  const handleSelectedHostedZoneChange = (zoneId: string) => {
+    setSelectedHostedZoneId(zoneId);
+    const zone = hostedZones.find((z) => z.id === zoneId);
+    const cred = zone ? dnsCredentials.find((c) => c.id === zone.providerCredentialId) : null;
+    if (cred?.providerType !== 'cloudflare') {
+      setDnsProxied(false);
+    }
+  };
+
   const buildInput = () => ({
     name: name.trim(),
     hostname: hostname.trim(),
@@ -157,7 +212,17 @@ export default function CreateDomainPage() {
     tlsSecretNamespace: needsTLS && tlsSecretNamespace !== 'fastgateway-system' ? tlsSecretNamespace : undefined,
     ...(domainNamespace !== 'fastgateway-system' ? { namespace: domainNamespace } : {}),
     labels: Object.keys(labels).length > 0 ? labels : undefined,
-    ...(dnsEnabled ? { dns: { enabled: true, recordType: dnsRecordType, ttl: dnsTtl ? Number(dnsTtl) : undefined, proxied: dnsProxied } } : {}),
+    ...(dnsEnabled && selectedHostedZoneId
+      ? {
+          dns: {
+            enabled: true,
+            hostedZoneId: selectedHostedZoneId,
+            recordType: dnsRecordType,
+            ttl: dnsTtl ? Number(dnsTtl) : undefined,
+            proxied: selectedZoneIsCloudflare ? dnsProxied : false,
+          },
+        }
+      : {}),
   });
 
   // Load preview when switching to Preview tab — only if all required fields are valid.
@@ -430,7 +495,7 @@ export default function CreateDomainPage() {
                             type="checkbox"
                             id="dnsEnabled"
                             checked={dnsEnabled}
-                            disabled={!activeDnsCredentialId}
+                            disabled={matchingZones.length === 0}
                             onChange={(e) => setDnsEnabled(e.target.checked)}
                             className="h-4 w-4 mt-0.5 rounded border-gray-300 text-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
                           />
@@ -439,15 +504,27 @@ export default function CreateDomainPage() {
                           </label>
                         </div>
 
-                        {!activeDnsCredentialId ? (
+                        {hostedZones.length === 0 ? (
                           <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
                             <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
                             <p className="text-sm text-amber-800">
-                              No active DNS provider credential is configured.{' '}
-                              <Link href="/dns-credentials" className="underline font-medium">
-                                Set one up in DNS Credentials
+                              No hosted zones are registered. Register one in{' '}
+                              <Link href="/dns-zones" className="underline font-medium">
+                                Hosted Zones
                               </Link>{' '}
-                              before DNS management can be enabled.
+                              before enabling DNS for this domain.
+                            </p>
+                          </div>
+                        ) : matchingZones.length === 0 ? (
+                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <p className="text-sm text-amber-800">
+                              No registered hosted zone covers{' '}
+                              <span className="font-mono">{hostname.trim() || 'this hostname'}</span>.
+                              Register a zone for its apex or a parent domain in{' '}
+                              <Link href="/dns-zones" className="underline font-medium">
+                                Hosted Zones
+                              </Link>.
                             </p>
                           </div>
                         ) : dnsEnabled && (
@@ -456,6 +533,17 @@ export default function CreateDomainPage() {
                               A DNS record will be created and kept in sync for{' '}
                               <span className="font-medium text-gray-700">{hostname || 'this hostname'}</span>.
                             </p>
+
+                            <Select
+                              id="dnsHostedZone"
+                              label="Hosted Zone"
+                              value={selectedHostedZoneId ?? ''}
+                              onChange={(e) => handleSelectedHostedZoneChange(e.target.value)}
+                              options={matchingZones.map((zone) => ({
+                                value: zone.id,
+                                label: credentialLabelFor(zone),
+                              }))}
+                            />
 
                             <Select
                               id="dnsRecordType"
@@ -481,21 +569,29 @@ export default function CreateDomainPage() {
                                 placeholder="Auto"
                                 value={dnsTtl}
                                 onChange={(e) => setDnsTtl(e.target.value)}
+                                disabled={dnsProxied}
                               />
+                              {dnsProxied && (
+                                <p className="mt-1 text-xs text-gray-500">
+                                  TTL is managed automatically by Cloudflare when proxied.
+                                </p>
+                              )}
                             </div>
 
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                id="dnsProxied"
-                                checked={dnsProxied}
-                                onChange={(e) => setDnsProxied(e.target.checked)}
-                                className="h-4 w-4 rounded border-gray-300 text-primary-600"
-                              />
-                              <label htmlFor="dnsProxied" className="text-sm font-medium text-gray-700">
-                                Proxied
-                              </label>
-                            </div>
+                            {selectedZoneIsCloudflare && (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id="dnsProxied"
+                                  checked={dnsProxied}
+                                  onChange={(e) => setDnsProxied(e.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-primary-600"
+                                />
+                                <label htmlFor="dnsProxied" className="text-sm font-medium text-gray-700">
+                                  Proxied
+                                </label>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
