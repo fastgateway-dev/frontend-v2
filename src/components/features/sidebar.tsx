@@ -96,6 +96,7 @@ export function Sidebar({ projectId }: SidebarProps) {
           title: 'DNS',
           items: [
             { href: '/dns-credentials', icon: Cloud, label: 'Provider' },
+            { href: '/dns-zones', icon: Network, label: 'Hosted Zones' },
           ],
         },
       ]
