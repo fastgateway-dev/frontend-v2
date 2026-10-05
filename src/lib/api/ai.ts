@@ -1,5 +1,6 @@
 import { getTokens } from './client';
-import type { AIStatus, AIGenerateRequest, AIStreamChunk, AIReviewRequest, AIReviewResult, AIChatRequest } from '@/types';
+import apiClient from './client';
+import type { AIStatus, AIGenerateRequest, AIStreamChunk, AIReviewRequest, AIReviewResult, AIChatRequest, AIConfig, AIConfigInput } from '@/types';
 
 const API_BASE = '/api/v1';
 
@@ -15,6 +16,21 @@ export const aiApi = {
       throw new Error('Failed to get AI status');
     }
     return response.json();
+  },
+
+  getConfig: async (): Promise<AIConfig> => {
+    const response = await apiClient.get<AIConfig>('/settings/ai');
+    return response.data;
+  },
+
+  updateConfig: async (input: AIConfigInput): Promise<AIConfig> => {
+    const response = await apiClient.put<AIConfig>('/settings/ai', input);
+    return response.data;
+  },
+
+  testConfig: async (input: AIConfigInput): Promise<{ ok: boolean }> => {
+    const response = await apiClient.post<{ ok: boolean }>('/settings/ai/test', input);
+    return response.data;
   },
 
   generate: (

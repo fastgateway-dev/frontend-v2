@@ -1730,6 +1730,31 @@ export interface AIStatus {
   provider?: 'anthropic' | 'openai';
 }
 
+export type AIProvider =
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'deepseek'
+  | 'openai_compatible';
+
+export interface AIConfig {
+  enabled: boolean;
+  provider: AIProvider;
+  model: string;
+  maxTokens: number;
+  baseURL: string;
+  apiKeySet: boolean; // true when a key is stored; the key itself is never returned
+}
+
+export interface AIConfigInput {
+  enabled: boolean;
+  provider: AIProvider;
+  apiKey?: string; // omit/blank to keep the stored key
+  model: string;
+  maxTokens: number;
+  baseURL: string; // only meaningful for openai_compatible
+}
+
 export interface AIWarning {
   field?: string;
   category: string;
