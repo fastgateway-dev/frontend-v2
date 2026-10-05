@@ -8,7 +8,6 @@ import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsCont
 import { domainsApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
 import { dnsRecordsApi } from '@/lib/api/dns-records';
-import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
 import { dnsRecordStatusBadge } from '@/lib/utils/dns';
 import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { AIReviewCard } from '@/components/features/ai-review-card';
@@ -302,7 +301,7 @@ export default function DomainSettingsPage() {
   };
 
   const buildDnsRecordInput = (): DNSRecordInput => ({
-    providerCredentialId: activeDnsCredentialId || undefined,
+    hostedZoneId: activeDnsCredentialId || undefined,
     recordType: dnsRecordType,
     ttl: dnsTtl ? parseInt(dnsTtl, 10) : undefined,
     proxied: dnsProxied,
@@ -375,12 +374,11 @@ export default function DomainSettingsPage() {
 
   const loadData = async () => {
     try {
-      const [domainData, settingsData, yamlsData, aiStatus, activeCredentialResult, dnsRecordResult] = await Promise.all([
+      const [domainData, settingsData, yamlsData, aiStatus, dnsRecordResult] = await Promise.all([
         domainsApi.get(projectId, domainId),
         domainsApi.getSettings(projectId, domainId).catch(() => null),
         domainsApi.getYamls(projectId, domainId).catch(() => null),
         aiApi.getStatus().catch(() => ({ enabled: false })),
-        dnsCredentialsApi.getActiveCredential().catch(() => ({ credentialId: null })),
         dnsRecordsApi.get(projectId, domainId).catch(() => null),
       ]);
 
@@ -388,7 +386,8 @@ export default function DomainSettingsPage() {
       setCertSecretName(domainData.tlsSecretName || '');
       setCertSecretNamespace(domainData.tlsSecretNamespace || 'fastgateway-system');
       setAiEnabled(aiStatus.enabled);
-      setActiveDnsCredentialId(activeCredentialResult.credentialId);
+      // TODO(task 17-19): replace with hosted-zone selection.
+      setActiveDnsCredentialId(dnsRecordResult?.hostedZoneId ?? null);
       if (dnsRecordResult) {
         applyDnsRecordToForm(dnsRecordResult);
       } else {

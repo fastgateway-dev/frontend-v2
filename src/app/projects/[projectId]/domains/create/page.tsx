@@ -10,7 +10,7 @@ import { AIReviewCard } from '@/components/features/ai-review-card';
 import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { domainsApi, domainTemplatesApi, projectsApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
-import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
+import { dnsZonesApi } from '@/lib/api/dns-zones';
 import { LabelsEditor } from '@/components/ui/labels-editor';
 import type { Project, DomainTemplate, AIReviewResult, TLSSecretInfo, DNSRecordType } from '@/types';
 
@@ -109,16 +109,17 @@ export default function CreateDomainPage() {
 
   const loadData = async () => {
     try {
-      const [projectData, templatesData, nsData, activeCredentialResult] = await Promise.all([
+      const [projectData, templatesData, nsData, hostedZones] = await Promise.all([
         projectsApi.get(projectId),
         domainTemplatesApi.list(projectId),
         domainsApi.listAvailableNamespaces(projectId).catch(() => ({ namespaces: ['fastgateway-system'] })),
-        dnsCredentialsApi.getActiveCredential().catch(() => ({ credentialId: null })),
+        dnsZonesApi.list().catch(() => []),
       ]);
       setProject(projectData);
       setDomainTemplates(templatesData.data);
       setAvailableDomainNamespaces(nsData.namespaces);
-      setActiveDnsCredentialId(activeCredentialResult.credentialId);
+      // TODO(task 17-19): replace with proper hosted-zone selection.
+      setActiveDnsCredentialId(hostedZones[0]?.id ?? null);
 
       aiApi.getStatus().then(status => setAiEnabled(status.enabled)).catch(() => {});
     } catch (error) {
@@ -157,7 +158,7 @@ export default function CreateDomainPage() {
     tlsSecretNamespace: needsTLS && tlsSecretNamespace !== 'fastgateway-system' ? tlsSecretNamespace : undefined,
     ...(domainNamespace !== 'fastgateway-system' ? { namespace: domainNamespace } : {}),
     labels: Object.keys(labels).length > 0 ? labels : undefined,
-    ...(dnsEnabled ? { dns: { enabled: true, recordType: dnsRecordType, ttl: dnsTtl ? Number(dnsTtl) : undefined, proxied: dnsProxied } } : {}),
+    ...(dnsEnabled ? { dns: { enabled: true, hostedZoneId: activeDnsCredentialId || undefined, recordType: dnsRecordType, ttl: dnsTtl ? Number(dnsTtl) : undefined, proxied: dnsProxied } } : {}),
   });
 
   // Load preview when switching to Preview tab — only if all required fields are valid.

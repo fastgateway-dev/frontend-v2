@@ -481,7 +481,7 @@ export default function DomainDetailPage() {
                                 </div>
                                 {renderValue('Record Type', dnsRecord.recordType)}
                                 {renderValue('Resolved Target', dnsRecord.resolvedTarget)}
-                                {renderValue('Provider Credential', dnsRecord.providerCredentialId)}
+                                {renderValue('Hosted Zone', dnsRecord.hostedZoneId)}
                                 {renderValue('TTL', dnsRecord.ttl)}
                                 {renderValue('Proxied', dnsRecord.proxied)}
                                 {dnsRecord.status === 'error' && dnsRecord.statusMessage && (
