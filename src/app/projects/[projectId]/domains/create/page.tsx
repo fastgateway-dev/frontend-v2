@@ -167,7 +167,13 @@ export default function CreateDomainPage() {
   useEffect(() => {
     const matchingIds = new Set(matchingZones.map((z) => z.id));
     if (!selectedHostedZoneId || !matchingIds.has(selectedHostedZoneId)) {
-      setSelectedHostedZoneId(matchingZones[0]?.id ?? null);
+      const newZoneId = matchingZones[0]?.id ?? null;
+      setSelectedHostedZoneId(newZoneId);
+      const newZone = newZoneId ? hostedZones.find((z) => z.id === newZoneId) : null;
+      const newZoneCred = newZone ? dnsCredentials.find((c) => c.id === newZone.providerCredentialId) : null;
+      if (newZoneCred?.providerType !== 'cloudflare') {
+        setDnsProxied(false);
+      }
     }
     if (matchingZones.length === 0 && dnsEnabled) {
       setDnsEnabled(false);

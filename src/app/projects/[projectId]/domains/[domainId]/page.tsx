@@ -491,7 +491,7 @@ export default function DomainDetailPage() {
                                 {renderValue('Resolved Target', dnsRecord.resolvedTarget)}
                                 {renderValue('Hosted Zone', (() => {
                                   const zone = hostedZones.find((z) => z.id === dnsRecord.hostedZoneId);
-                                  if (!zone) return dnsRecord.hostedZoneId;
+                                  if (!zone) return `Unknown zone (${dnsRecord.hostedZoneId.slice(0, 8)})`;
                                   const cred = dnsCredentials.find((c) => c.id === zone.providerCredentialId);
                                   const providerLabel = cred ? cred.providerType : 'unknown provider';
                                   return `${zone.name} (${providerLabel})`;
