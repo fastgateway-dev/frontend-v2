@@ -1,7 +1,11 @@
 import apiClient from './client';
-import type { DomainDNSRecord, DNSRecordInput } from '@/types';
+import type { DomainDNSRecord, DomainDNSRecordListItem, DNSRecordInput } from '@/types';
 
 export const dnsRecordsApi = {
+  list: async (projectId: string): Promise<DomainDNSRecordListItem[]> => {
+    const r = await apiClient.get<DomainDNSRecordListItem[]>(`/projects/${projectId}/dns-records`);
+    return r.data;
+  },
   get: async (projectId: string, domainId: string): Promise<DomainDNSRecord> => {
     const r = await apiClient.get<DomainDNSRecord>(`/projects/${projectId}/domains/${domainId}/dns-record`);
     return r.data;

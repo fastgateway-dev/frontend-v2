@@ -38,3 +38,11 @@ test('refresh posts to the refresh endpoint', async () => {
   expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/domains/d1/dns-record/refresh', {});
   expect(r).toEqual({ id: 'r1', status: 'pending' });
 });
+
+test('list fetches project dns records', async () => {
+  (apiClient.get as jest.Mock).mockResolvedValue({ data: [{ id: 'r1', domainHostname: 'a.example.com', zoneName: 'example.com' }] });
+  const r = await dnsRecordsApi.list('p1');
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/dns-records');
+  expect(r).toHaveLength(1);
+  expect(r[0].domainHostname).toBe('a.example.com');
+});

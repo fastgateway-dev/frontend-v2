@@ -2104,6 +2104,11 @@ export interface DNSRecordInput {
   proxied?: boolean;
 }
 
+export interface DomainDNSRecordListItem extends DomainDNSRecord {
+  domainHostname: string;
+  zoneName: string;
+}
+
 // DNS Hosted Zone types
 export type DNSZoneStatus = 'pending' | 'ready' | 'error';
 
