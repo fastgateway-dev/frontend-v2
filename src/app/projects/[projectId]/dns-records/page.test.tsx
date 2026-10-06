@@ -11,7 +11,10 @@ jest.mock('@/lib/api/dns-records', () => ({
   },
 }));
 jest.mock('@/lib/api/dns-zones', () => ({ dnsZonesApi: { list: jest.fn().mockResolvedValue([]) } }));
+jest.mock('@/lib/api/dns-credentials', () => ({ dnsCredentialsApi: { list: jest.fn().mockResolvedValue([]) } }));
 import { dnsRecordsApi } from '@/lib/api/dns-records';
+import { dnsZonesApi } from '@/lib/api/dns-zones';
+import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
 
 const rows = [
   {
@@ -25,6 +28,13 @@ beforeEach(() => {
   (dnsRecordsApi.list as jest.Mock).mockResolvedValue(rows);
   (dnsRecordsApi.remove as jest.Mock).mockClear();
   (dnsRecordsApi.refresh as jest.Mock).mockClear();
+  (dnsRecordsApi.update as jest.Mock).mockClear();
+  (dnsZonesApi.list as jest.Mock).mockResolvedValue([
+    { id: 'z1', name: 'example.com', providerCredentialId: 'c1', status: 'ready', createdAt: '', updatedAt: '' },
+  ]);
+  (dnsCredentialsApi.list as jest.Mock).mockResolvedValue([
+    { id: 'c1', name: 'cf', providerType: 'cloudflare', createdAt: '', updatedAt: '' },
+  ]);
 });
 
 test('lists records', async () => {
@@ -59,4 +69,36 @@ test('refresh re-fetches', async () => {
   await waitFor(() => screen.getByText('a.example.com'));
   fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
   await waitFor(() => expect(dnsRecordsApi.refresh).toHaveBeenCalledWith('p1', 'd1'));
+});
+
+test('edit opens the modal and saves the update', async () => {
+  render(<DNSRecordsPage />);
+  await waitFor(() => screen.getByText('a.example.com'));
+  fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+
+  // modal fields populate from the row + loaded zones
+  await waitFor(() => expect(screen.getByLabelText('Record Type')).toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText('Record Type'), { target: { value: 'CNAME' } });
+  fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+  await waitFor(() =>
+    expect(dnsRecordsApi.update).toHaveBeenCalledWith('p1', 'd1', {
+      hostedZoneId: 'z1',
+      recordType: 'CNAME',
+      ttl: undefined,
+      proxied: false,
+    }),
+  );
+});
+
+test('edit surfaces an error and blocks save when hosted zones fail to load', async () => {
+  (dnsZonesApi.list as jest.Mock).mockRejectedValue(new Error('zones down'));
+  render(<DNSRecordsPage />);
+  await waitFor(() => screen.getByText('a.example.com'));
+  fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+
+  await waitFor(() => expect(screen.getByText(/couldn't load hosted zones/i)).toBeInTheDocument());
+  expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+  expect(dnsRecordsApi.update).not.toHaveBeenCalled();
 });

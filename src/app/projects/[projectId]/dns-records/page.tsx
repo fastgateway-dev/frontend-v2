@@ -36,6 +36,7 @@ export default function DNSRecordsPage() {
   const [editProxied, setEditProxied] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [editLoadFailed, setEditLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -81,13 +82,19 @@ export default function DNSRecordsPage() {
     setEditTtl(row.ttl != null ? String(row.ttl) : '');
     setEditProxied(row.proxied);
     setEditError(null);
+    setEditLoadFailed(false);
     try {
       const [z, c] = await Promise.all([dnsZonesApi.list(), dnsCredentialsApi.list()]);
       setZones(z);
       setCredentials(c);
     } catch {
+      // Without the zones/credentials we can't show the zone options or tell
+      // whether the zone is Cloudflare (which drives proxied) — block the save
+      // rather than silently writing a wrong payload.
       setZones([]);
       setCredentials([]);
+      setEditLoadFailed(true);
+      setEditError("Couldn't load hosted zones. Close and try again.");
     }
   };
 
@@ -218,7 +225,7 @@ export default function DNSRecordsPage() {
             <Button variant="secondary" onClick={() => setEditing(null)} disabled={isSaving}>
               Cancel
             </Button>
-            <Button onClick={handleSaveEdit} disabled={isSaving || !editHostedZoneId}>
+            <Button onClick={handleSaveEdit} disabled={isSaving || !editHostedZoneId || editLoadFailed}>
               {isSaving ? 'Saving…' : 'Save'}
             </Button>
           </div>
