@@ -37,6 +37,8 @@ export default function DNSRecordsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [editLoadFailed, setEditLoadFailed] = useState(false);
+  const [isEditLoading, setIsEditLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -56,9 +58,12 @@ export default function DNSRecordsPage() {
 
   const handleRefresh = async (row: DomainDNSRecordListItem) => {
     setBusyDomainId(row.domainId);
+    setActionError(null);
     try {
       await dnsRecordsApi.refresh(projectId, row.domainId);
       await load();
+    } catch {
+      setActionError(`Couldn't refresh the DNS record for ${row.domainHostname}.`);
     } finally {
       setBusyDomainId(null);
     }
@@ -67,9 +72,12 @@ export default function DNSRecordsPage() {
   const handleDelete = async (row: DomainDNSRecordListItem) => {
     if (!window.confirm(`Delete the DNS record for ${row.domainHostname}?`)) return;
     setBusyDomainId(row.domainId);
+    setActionError(null);
     try {
       await dnsRecordsApi.remove(projectId, row.domainId);
       await load();
+    } catch {
+      setActionError(`Couldn't delete the DNS record for ${row.domainHostname}.`);
     } finally {
       setBusyDomainId(null);
     }
@@ -83,6 +91,7 @@ export default function DNSRecordsPage() {
     setEditProxied(row.proxied);
     setEditError(null);
     setEditLoadFailed(false);
+    setIsEditLoading(true);
     try {
       const [z, c] = await Promise.all([dnsZonesApi.list(), dnsCredentialsApi.list()]);
       setZones(z);
@@ -95,6 +104,8 @@ export default function DNSRecordsPage() {
       setCredentials([]);
       setEditLoadFailed(true);
       setEditError("Couldn't load hosted zones. Close and try again.");
+    } finally {
+      setIsEditLoading(false);
     }
   };
 
@@ -139,6 +150,10 @@ export default function DNSRecordsPage() {
           Every DNS record FastGateway manages across this project&apos;s domains.
         </p>
       </div>
+
+      {actionError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">{actionError}</div>
+      )}
 
       {error ? (
         <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">{error}</div>
@@ -225,7 +240,7 @@ export default function DNSRecordsPage() {
             <Button variant="secondary" onClick={() => setEditing(null)} disabled={isSaving}>
               Cancel
             </Button>
-            <Button onClick={handleSaveEdit} disabled={isSaving || !editHostedZoneId || editLoadFailed}>
+            <Button onClick={handleSaveEdit} disabled={isSaving || !editHostedZoneId || editLoadFailed || isEditLoading}>
               {isSaving ? 'Saving…' : 'Save'}
             </Button>
           </div>

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import DNSRecordsPage from './page';
 
 jest.mock('next/navigation', () => ({ useParams: () => ({ projectId: 'p1' }) }));
@@ -101,4 +101,30 @@ test('edit surfaces an error and blocks save when hosted zones fail to load', as
   expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
   expect(dnsRecordsApi.update).not.toHaveBeenCalled();
+});
+
+test('edit disables save while hosted zones are loading', async () => {
+  let resolveZones: (v: unknown) => void = () => {};
+  (dnsZonesApi.list as jest.Mock).mockReturnValue(new Promise((r) => { resolveZones = r; }));
+  render(<DNSRecordsPage />);
+  await waitFor(() => screen.getByText('a.example.com'));
+  fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+
+  const save = await screen.findByRole('button', { name: /^save$/i });
+  expect(save).toBeDisabled(); // still loading zones -> can't know Cloudflare -> can't save
+
+  await act(async () => {
+    resolveZones([{ id: 'z1', name: 'example.com', providerCredentialId: 'c1', status: 'ready', createdAt: '', updatedAt: '' }]);
+  });
+  await waitFor(() => expect(screen.getByRole('button', { name: /^save$/i })).not.toBeDisabled());
+});
+
+test('shows an error when delete fails, keeping the list visible', async () => {
+  window.confirm = jest.fn(() => true);
+  (dnsRecordsApi.remove as jest.Mock).mockRejectedValue(new Error('nope'));
+  render(<DNSRecordsPage />);
+  await waitFor(() => screen.getByText('a.example.com'));
+  fireEvent.click(screen.getByRole('button', { name: /delete/i }));
+  await waitFor(() => expect(screen.getByText(/couldn't delete/i)).toBeInTheDocument());
+  expect(screen.getByText('a.example.com')).toBeInTheDocument(); // table not replaced by the error
 });
