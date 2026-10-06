@@ -121,6 +121,11 @@ export function Sidebar({ projectId }: SidebarProps) {
     // Domains - visible to all team members
     resourcesNavItems.push({ href: `/projects/${projectId}/domains`, icon: Globe, label: 'Domains' });
 
+    // DNS Records - only for members who can manage domains (same gate as the DNS records API)
+    if (permissions.canManageDomains) {
+      resourcesNavItems.push({ href: `/projects/${projectId}/dns-records`, icon: Network, label: 'DNS Records' });
+    }
+
     // Certificates - only for members with certificate.view permission
     if (hasCertPerm(permissions, 'certificate.view')) {
       resourcesNavItems.push({ href: `/projects/${projectId}/certificates`, icon: FileKey, label: 'Certificates' });
