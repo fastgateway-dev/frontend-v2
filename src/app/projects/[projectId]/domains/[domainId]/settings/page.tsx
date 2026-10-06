@@ -11,6 +11,7 @@ import { dnsRecordsApi } from '@/lib/api/dns-records';
 import { dnsZonesApi } from '@/lib/api/dns-zones';
 import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
 import { dnsRecordStatusBadge, matchingZonesFor } from '@/lib/utils/dns';
+import { DNSRecordFields } from '@/components/features/dns-record-fields';
 import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { AIReviewCard } from '@/components/features/ai-review-card';
 import { YamlDiffViewer } from '@/components/features/yaml-diff-viewer';
@@ -1193,64 +1194,18 @@ export default function DomainSettingsPage() {
                           </div>
                         ) : (
                           <div className="space-y-3 max-w-2xl">
-                            <Select
-                              id="dnsHostedZone"
-                              label="Hosted Zone"
-                              value={selectedHostedZoneId ?? ''}
-                              onChange={(e) => handleSelectedHostedZoneChange(e.target.value)}
-                              options={matchingZones.map((zone) => ({
-                                value: zone.id,
-                                label: credentialLabelFor(zone),
-                              }))}
+                            <DNSRecordFields
+                              zoneOptions={matchingZones.map((zone) => ({ value: zone.id, label: credentialLabelFor(zone) }))}
+                              hostedZoneId={selectedHostedZoneId ?? ''}
+                              onHostedZoneChange={handleSelectedHostedZoneChange}
+                              recordType={dnsRecordType}
+                              onRecordTypeChange={setDnsRecordType}
+                              ttl={dnsTtl}
+                              onTtlChange={setDnsTtl}
+                              proxied={dnsProxied}
+                              onProxiedChange={setDnsProxied}
+                              showProxied={selectedZoneIsCloudflare}
                             />
-
-                            <Select
-                              id="dnsRecordType"
-                              label="Record Type"
-                              value={dnsRecordType}
-                              onChange={(e) => setDnsRecordType(e.target.value as DNSRecordType)}
-                              options={[
-                                { value: 'auto', label: 'Auto' },
-                                { value: 'A', label: 'A' },
-                                { value: 'AAAA', label: 'AAAA' },
-                                { value: 'CNAME', label: 'CNAME' },
-                              ]}
-                            />
-
-                            <div>
-                              <label htmlFor="dnsTtl" className="block text-sm font-medium text-gray-700 mb-1">
-                                TTL
-                              </label>
-                              <Input
-                                id="dnsTtl"
-                                type="number"
-                                min={0}
-                                placeholder="Auto"
-                                value={dnsTtl}
-                                onChange={(e) => setDnsTtl(e.target.value)}
-                                disabled={dnsProxied}
-                              />
-                              {dnsProxied && (
-                                <p className="mt-1 text-xs text-gray-500">
-                                  TTL is managed automatically by Cloudflare when proxied.
-                                </p>
-                              )}
-                            </div>
-
-                            {selectedZoneIsCloudflare && (
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  id="dnsProxied"
-                                  checked={dnsProxied}
-                                  onChange={(e) => setDnsProxied(e.target.checked)}
-                                  className="h-4 w-4 rounded border-gray-300 text-primary-600"
-                                />
-                                <label htmlFor="dnsProxied" className="text-sm font-medium text-gray-700">
-                                  Proxied
-                                </label>
-                              </div>
-                            )}
 
                             {dnsRecord && (
                               <div className="pt-2 border-t space-y-1">
