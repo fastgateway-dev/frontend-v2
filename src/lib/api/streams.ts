@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { Stream, CreateStreamInput, UpdateStreamInput, StreamRoute, L4Metrics, PaginatedResponse } from '@/types';
+import type { Stream, CreateStreamInput, UpdateStreamInput, StreamRoute, L4Metrics, PaginatedResponse, Route, RouteWithWarnings, CreateRouteInput, UpdateRouteInput } from '@/types';
 
 export const streamsApi = {
   list: async (projectId: string): Promise<{ data: Stream[] }> => {
@@ -31,6 +31,49 @@ export const streamsApi = {
     const response = await apiClient.get<PaginatedResponse<StreamRoute>>(
       `/projects/${projectId}/streams/${streamId}/routes`,
       { params: { page, limit } }
+    );
+    return response.data;
+  },
+
+  getRoute: async (projectId: string, streamId: string, routeId: string): Promise<Route> => {
+    const response = await apiClient.get<Route>(
+      `/projects/${projectId}/streams/${streamId}/routes/${routeId}`
+    );
+    return response.data;
+  },
+
+  // Create an L4 route under a stream. A listener port already in use returns HTTP 409.
+  createRoute: async (projectId: string, streamId: string, data: CreateRouteInput): Promise<RouteWithWarnings> => {
+    const response = await apiClient.post<RouteWithWarnings>(
+      `/projects/${projectId}/streams/${streamId}/routes`,
+      data
+    );
+    return response.data;
+  },
+
+  updateRoute: async (
+    projectId: string,
+    streamId: string,
+    routeId: string,
+    data: UpdateRouteInput
+  ): Promise<RouteWithWarnings> => {
+    const response = await apiClient.put<RouteWithWarnings>(
+      `/projects/${projectId}/streams/${streamId}/routes/${routeId}`,
+      data
+    );
+    return response.data;
+  },
+
+  deleteRoute: async (projectId: string, streamId: string, routeId: string): Promise<Route> => {
+    const response = await apiClient.delete<Route>(
+      `/projects/${projectId}/streams/${streamId}/routes/${routeId}`
+    );
+    return response.data;
+  },
+
+  deployRoute: async (projectId: string, streamId: string, routeId: string): Promise<Route> => {
+    const response = await apiClient.post<Route>(
+      `/projects/${projectId}/streams/${streamId}/routes/${routeId}/deploy`
     );
     return response.data;
   },

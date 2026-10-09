@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Trash2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Trash2, AlertTriangle, Plus, Pencil, Rocket } from 'lucide-react';
 import { Button, Card, CardContent, Badge, Modal } from '@/components/ui';
 import { streamsApi, permissionsApi } from '@/lib/api';
 import { L4MetricsCard } from '@/components/metrics/L4MetricsCard';
@@ -24,6 +24,8 @@ export default function StreamDetailPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deployingRouteId, setDeployingRouteId] = useState<string | null>(null);
+  const [routeActionError, setRouteActionError] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -63,6 +65,22 @@ export default function StreamDetailPage() {
       setIsDeleting(false);
     }
   };
+
+  const handleDeployRoute = async (routeId: string) => {
+    setDeployingRouteId(routeId);
+    setRouteActionError(null);
+    try {
+      await streamsApi.deployRoute(projectId, streamId, routeId);
+      await loadData();
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      setRouteActionError(err.response?.data?.error || 'Failed to deploy route');
+    } finally {
+      setDeployingRouteId(null);
+    }
+  };
+
+  const canDeployRoute = (route: StreamRoute) => route.status === 'approved' || route.status === 'pending_deploy';
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -204,10 +222,21 @@ export default function StreamDetailPage() {
 
       <Card>
         <CardContent className="pt-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Routes
-            {routes.length > 0 && <Badge variant="default" className="ml-2 text-xs">{routes.length}</Badge>}
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Routes
+              {routes.length > 0 && <Badge variant="default" className="ml-2 text-xs">{routes.length}</Badge>}
+            </h2>
+            {permissions?.canCreateRoutes && (
+              <Link href={`/projects/${projectId}/streams/${streamId}/routes/create`}>
+                <Button size="sm">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add route
+                </Button>
+              </Link>
+            )}
+          </div>
+          {routeActionError && <p className="mb-3 text-sm text-red-700">{routeActionError}</p>}
           {routes.length === 0 ? (
             <p className="text-sm text-gray-500">No routes yet.</p>
           ) : (
@@ -217,7 +246,8 @@ export default function StreamDetailPage() {
                   <th className="py-2 pr-4 font-medium">Name</th>
                   <th className="py-2 pr-4 font-medium">Protocol</th>
                   <th className="py-2 pr-4 font-medium">Port</th>
-                  <th className="py-2 font-medium">Status</th>
+                  <th className="py-2 pr-4 font-medium">Status</th>
+                  <th className="py-2 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -226,7 +256,29 @@ export default function StreamDetailPage() {
                     <td className="py-2 pr-4 font-medium text-gray-900">{route.name}</td>
                     <td className="py-2 pr-4 text-gray-600">{(route.protocol || '').toUpperCase()}</td>
                     <td className="py-2 pr-4 text-gray-600 font-mono">{route.config?.listenerPort ?? '—'}</td>
-                    <td className="py-2">{getStatusBadge(route.status)}</td>
+                    <td className="py-2 pr-4">{getStatusBadge(route.status)}</td>
+                    <td className="py-2">
+                      <div className="flex items-center justify-end gap-2">
+                        {permissions?.canCreateRoutes && (
+                          <Link href={`/projects/${projectId}/streams/${streamId}/routes/${route.id}/edit`}>
+                            <Button size="sm" variant="secondary" aria-label={`Edit ${route.name}`}>
+                              <Pencil className="h-4 w-4 mr-1" />
+                              Edit
+                            </Button>
+                          </Link>
+                        )}
+                        {canDeployRoute(route) && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleDeployRoute(route.id)}
+                            disabled={deployingRouteId === route.id}
+                          >
+                            <Rocket className="h-4 w-4 mr-1" />
+                            {deployingRouteId === route.id ? 'Deploying...' : 'Deploy'}
+                          </Button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

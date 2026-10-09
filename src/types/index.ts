@@ -692,7 +692,7 @@ export interface DomainTemplateCreatePreviewResult {
 
 // Route types
 export type RouteStatus = 'pending_create' | 'pending_update' | 'pending_delete' | 'approved' | 'pending_deploy' | 'active' | 'rejected';
-export type RouteProtocol = 'http' | 'grpc';
+export type RouteProtocol = 'http' | 'grpc' | 'tcp' | 'udp';
 export type SecurityMode = 'general' | 'client';
 
 export interface PathMatch {
@@ -843,6 +843,8 @@ export interface RouteConfig {
   requestHeaderModifier?: HeaderModifier;
   responseHeaderModifier?: HeaderModifier;
   urlRewrite?: URLRewrite;
+  // Gateway listener port for L4 (tcp/udp) routes; lives in config to match the backend RouteConfig and StreamRoute.
+  listenerPort?: number;
   // Default traffic policy for requests without x-client-id header (when clients are attached)
   defaultTrafficPolicy?: DefaultTrafficPolicy;
   defaultAllowedCIDRs?: string[];    // CIDRs for "require_ip_allowlist" policy
@@ -1341,6 +1343,8 @@ export interface BackendTrafficPolicyInput {
 export interface Route {
   id: string;
   domainId: string;
+  /** Owning Stream for L4 (tcp/udp) routes; such routes have no domain. */
+  streamId?: string;
   teamId: string;
   team?: Team;
   name: string;
@@ -1373,6 +1377,8 @@ export interface Route {
 export type RouteWithWarnings = Route & { warnings?: string[] };
 
 export interface CreateRouteInput {
+  /** Set only for L4 routes; the stream-scoped endpoint also sets it server-side. */
+  streamId?: string;
   name: string;
   description?: string;
   protocol?: RouteProtocol;
@@ -1390,6 +1396,7 @@ export interface CreateRouteInput {
 
 export interface UpdateRouteInput {
   description?: string;
+  changeDescription?: string;
   config: RouteConfig;
   securityPolicy?: SecurityPolicyInput;
   backendTrafficPolicy?: BackendTrafficPolicyInput;
