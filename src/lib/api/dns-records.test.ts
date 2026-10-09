@@ -12,7 +12,7 @@ test('get fetches the dns record', async () => {
 
 test('enable posts the dns record input', async () => {
   (apiClient.post as jest.Mock).mockResolvedValue({ data: { id: 'r1' } });
-  const input = { providerCredentialId: 'c1', recordType: 'A' as const, proxied: true };
+  const input = { hostedZoneId: 'z1', recordType: 'A' as const, proxied: true };
   const r = await dnsRecordsApi.enable('p1', 'd1', input);
   expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/domains/d1/dns-record', input);
   expect(r).toEqual({ id: 'r1' });
@@ -33,8 +33,16 @@ test('remove deletes the dns record', async () => {
 });
 
 test('refresh posts to the refresh endpoint', async () => {
-  (apiClient.post as jest.Mock).mockResolvedValue({ data: { id: 'r1', status: 'syncing' } });
+  (apiClient.post as jest.Mock).mockResolvedValue({ data: { id: 'r1', status: 'pending' } });
   const r = await dnsRecordsApi.refresh('p1', 'd1');
   expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/domains/d1/dns-record/refresh', {});
-  expect(r).toEqual({ id: 'r1', status: 'syncing' });
+  expect(r).toEqual({ id: 'r1', status: 'pending' });
+});
+
+test('list fetches project dns records', async () => {
+  (apiClient.get as jest.Mock).mockResolvedValue({ data: [{ id: 'r1', domainHostname: 'a.example.com', zoneName: 'example.com' }] });
+  const r = await dnsRecordsApi.list('p1');
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/dns-records');
+  expect(r).toHaveLength(1);
+  expect(r[0].domainHostname).toBe('a.example.com');
 });

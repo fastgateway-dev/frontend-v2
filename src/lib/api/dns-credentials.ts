@@ -25,13 +25,4 @@ export const dnsCredentialsApi = {
   delete: async (id: string): Promise<void> => {
     await apiClient.delete(`/dns/credentials/${id}`);
   },
-
-  getActiveCredential: async (): Promise<{ credentialId: string | null }> => {
-    const r = await apiClient.get<{ credentialId: string | null }>('/dns/settings/active-credential');
-    return r.data;
-  },
-
-  setActiveCredential: async (credentialId: string): Promise<void> => {
-    await apiClient.put('/dns/settings/active-credential', { credentialId });
-  },
 };

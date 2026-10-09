@@ -33,6 +33,8 @@ interface EditFormValues {
   replicas: number;
   minReplicas: number;
   maxReplicas: number;
+  enableDomain: boolean;
+  enableStream: boolean;
 }
 
 interface TelemetryState {
@@ -62,6 +64,8 @@ type UpdateBody = Partial<CreateDomainTemplateInput> & {
 function buildUpdateInput(values: EditFormValues, telemetry?: TelemetryState, scheduling?: SchedulingState): UpdateBody {
   const input: UpdateBody = {
     description: values.description || undefined,
+    enableDomain: values.enableDomain,
+    enableStream: values.enableStream,
   };
 
   if (values.externalTrafficPolicy) {
@@ -211,6 +215,8 @@ export default function DomainTemplateEditPage() {
       replicas: 1,
       minReplicas: 1,
       maxReplicas: 3,
+      enableDomain: true,
+      enableStream: false,
     },
   });
 
@@ -225,6 +231,9 @@ export default function DomainTemplateEditPage() {
   });
 
   const scalingType = watch('scalingType');
+  const watchEnableDomain = watch('enableDomain');
+  const watchEnableStream = watch('enableStream');
+  const noCapabilitySelected = !watchEnableDomain && !watchEnableStream;
 
   // Load template data
   useEffect(() => {
@@ -251,6 +260,8 @@ export default function DomainTemplateEditPage() {
           replicas: data.scalingConfig?.replicas || 1,
           minReplicas: data.scalingConfig?.minReplicas || 1,
           maxReplicas: data.scalingConfig?.maxReplicas || 3,
+          enableDomain: data.enableDomain ?? true,
+          enableStream: data.enableStream ?? false,
         });
 
         // Initialize telemetry state from loaded template
@@ -264,7 +275,7 @@ export default function DomainTemplateEditPage() {
         setDeploymentStrategy(data.deploymentStrategy ?? null);
       } catch (err: unknown) {
         const errorObj = err as { response?: { data?: { error?: string } } };
-        setError(errorObj.response?.data?.error || 'Failed to load domain template');
+        setError(errorObj.response?.data?.error || 'Failed to load gateway template');
       } finally {
         setIsLoading(false);
       }
@@ -375,7 +386,7 @@ export default function DomainTemplateEditPage() {
       <div className="p-8">
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-red-600">{error || 'Domain template not found'}</p>
+            <p className="text-red-600">{error || 'Gateway template not found'}</p>
             <Link href={`/projects/${projectId}/domain-templates`}>
               <Button variant="secondary" className="mt-4">
                 <ArrowLeft className="h-4 w-4 mr-2" />Back to Templates
@@ -394,7 +405,7 @@ export default function DomainTemplateEditPage() {
         <ArrowLeft className="h-4 w-4" />Back to Template
       </Link>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Edit Domain Template</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">Edit Gateway Template</h1>
 
       {/* Error message */}
       {error && (
@@ -423,23 +434,25 @@ export default function DomainTemplateEditPage() {
               <span className="text-gray-500">Exposure Type:</span>{' '}
               <Badge variant="default">{template.exposureType}</Badge>
             </div>
-            <div>
-              <span className="text-gray-500">TLS Mode:</span>{' '}
-              <Badge variant="info">{template.tlsMode.replace('_', ' ')}</Badge>
-            </div>
-            {template.tlsMode !== 'no_tls' && (
+            {template.enableDomain && (
+              <div>
+                <span className="text-gray-500">TLS Mode:</span>{' '}
+                <Badge variant="info">{template.tlsMode.replace('_', ' ')}</Badge>
+              </div>
+            )}
+            {template.enableDomain && template.tlsMode !== 'no_tls' && (
               <div>
                 <span className="text-gray-500">TLS Policy:</span>{' '}
                 <span className="font-medium capitalize">{template.tlsPolicy}</span>
               </div>
             )}
-            {template.tlsMode !== 'tls_only' && (
+            {template.enableDomain && template.tlsMode !== 'tls_only' && (
               <div>
                 <span className="text-gray-500">HTTP Port:</span>{' '}
                 <span className="font-medium">{template.httpPort}</span>
               </div>
             )}
-            {template.tlsMode !== 'no_tls' && (
+            {template.enableDomain && template.tlsMode !== 'no_tls' && (
               <div>
                 <span className="text-gray-500">HTTPS Port:</span>{' '}
                 <span className="font-medium">{template.httpsPort}</span>
@@ -465,6 +478,34 @@ export default function DomainTemplateEditPage() {
             {/* SETTINGS TAB */}
             <TabsContent value="settings">
               <div className="space-y-6 mt-4">
+                {/* Capabilities */}
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-4">Capabilities</h3>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        {...register('enableDomain')}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Enable for Domains</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        {...register('enableStream')}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Enable for Streams</span>
+                    </label>
+                    {noCapabilitySelected && (
+                      <p className="text-sm text-red-600" role="alert">
+                        Select at least one capability: Domains or Streams.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
                 {/* Description */}
                 <div>
                   <h3 className="font-semibold text-gray-900 mb-4">Description</h3>
@@ -822,6 +863,7 @@ export default function DomainTemplateEditPage() {
           variant="primary"
           onClick={handleApplyChanges}
           isLoading={isApplying}
+          disabled={noCapabilitySelected}
         >
           Apply Changes
         </Button>

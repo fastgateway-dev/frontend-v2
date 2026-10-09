@@ -276,7 +276,67 @@ export interface CreateDomainInput {
   tlsSecretNamespace?: string;
   namespace?: string;
   labels?: Record<string, string>;
-  dns?: { enabled: boolean; providerCredentialId?: string; recordType?: DNSRecordType; ttl?: number; proxied?: boolean };
+  dns?: { enabled: boolean; hostedZoneId?: string; recordType?: DNSRecordType; ttl?: number; proxied?: boolean };
+}
+
+// L4 Streams (TCP/UDP). A Stream owns a dedicated Gateway; L4 routes attach to it.
+export type StreamStatus = 'pending' | 'active' | 'error';
+
+export interface Stream {
+  id: string;
+  projectId: string;
+  name: string;
+  namespace: string;
+  gatewayTemplateId: string;
+  k8sGatewayName: string;
+  k8sGatewayClass: string;
+  status: StreamStatus;
+  statusMessage?: string;
+  /** External LB address (IP or hostname) of the stream's Gateway, when the backend exposes it. */
+  loadBalancerAddress?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateStreamInput {
+  name: string;
+  namespace: string;
+  gatewayTemplateId: string;
+}
+
+export interface UpdateStreamInput {
+  name?: string;
+}
+
+/** Minimal shape of an L4 route owned by a Stream (full L4 route model lands with the L4 route form). */
+export interface StreamRoute {
+  id: string;
+  streamId?: string;
+  name: string;
+  protocol: 'tcp' | 'udp' | string;
+  status: string;
+  config?: { listenerPort?: number };
+}
+
+/** Per-listener L4 (TCP/UDP) metrics. L4 has no latency/error/RPS series. */
+export interface L4ListenerMetrics {
+  port: number;
+  protocol: 'tcp' | 'udp' | string;
+  activeConnections: number;
+  /** New connections per second. */
+  connectionRate: number;
+  bytesIn: number;
+  bytesOut: number;
+}
+
+/** Aggregate + per-listener metrics for a Stream. */
+export interface L4Metrics {
+  streamId: string;
+  listeners: L4ListenerMetrics[];
+  activeConnections: number;
+  connectionRate: number;
+  bytesIn: number;
+  bytesOut: number;
 }
 
 export interface TLSSecretInfo {
@@ -569,6 +629,8 @@ export interface DomainTemplate {
   containerResources?: ContainerResourcesConfig;
   scalingConfig?: ScalingConfig;
   mergeGateways: boolean;
+  enableDomain: boolean;
+  enableStream: boolean;
   telemetryAccessLog?: TelemetryAccessLogConfig | null;
   telemetryTracing?: TelemetryTracingConfig | null;
   telemetryMetrics?: TelemetryMetricsConfig | null;
@@ -600,6 +662,8 @@ export interface CreateDomainTemplateInput {
   containerResources?: ContainerResourcesConfig;
   scalingConfig?: ScalingConfig;
   mergeGateways?: boolean;
+  enableDomain?: boolean;
+  enableStream?: boolean;
   telemetryAccessLog?: TelemetryAccessLogConfig | null;
   telemetryTracing?: TelemetryTracingConfig | null;
   telemetryMetrics?: TelemetryMetricsConfig | null;
@@ -628,7 +692,7 @@ export interface DomainTemplateCreatePreviewResult {
 
 // Route types
 export type RouteStatus = 'pending_create' | 'pending_update' | 'pending_delete' | 'approved' | 'pending_deploy' | 'active' | 'rejected';
-export type RouteProtocol = 'http' | 'grpc';
+export type RouteProtocol = 'http' | 'grpc' | 'tcp' | 'udp';
 export type SecurityMode = 'general' | 'client';
 
 export interface PathMatch {
@@ -779,6 +843,8 @@ export interface RouteConfig {
   requestHeaderModifier?: HeaderModifier;
   responseHeaderModifier?: HeaderModifier;
   urlRewrite?: URLRewrite;
+  // Gateway listener port for L4 (tcp/udp) routes; lives in config to match the backend RouteConfig and StreamRoute.
+  listenerPort?: number;
   // Default traffic policy for requests without x-client-id header (when clients are attached)
   defaultTrafficPolicy?: DefaultTrafficPolicy;
   defaultAllowedCIDRs?: string[];    // CIDRs for "require_ip_allowlist" policy
@@ -1276,7 +1342,10 @@ export interface BackendTrafficPolicyInput {
 
 export interface Route {
   id: string;
-  domainId: string;
+  /** Absent/null for L4 (tcp/udp) routes, which belong to a Stream instead. */
+  domainId?: string;
+  /** Owning Stream for L4 (tcp/udp) routes; such routes have no domain. */
+  streamId?: string;
   teamId: string;
   team?: Team;
   name: string;
@@ -1309,6 +1378,8 @@ export interface Route {
 export type RouteWithWarnings = Route & { warnings?: string[] };
 
 export interface CreateRouteInput {
+  /** Set only for L4 routes; the stream-scoped endpoint also sets it server-side. */
+  streamId?: string;
   name: string;
   description?: string;
   protocol?: RouteProtocol;
@@ -1326,6 +1397,7 @@ export interface CreateRouteInput {
 
 export interface UpdateRouteInput {
   description?: string;
+  changeDescription?: string;
   config: RouteConfig;
   securityPolicy?: SecurityPolicyInput;
   backendTrafficPolicy?: BackendTrafficPolicyInput;
@@ -2079,29 +2151,48 @@ export interface CertificateDistribution {
 }
 
 // DNS Record types
-export type DNSRecordStatus = 'pending' | 'syncing' | 'ready' | 'error';
+export type DNSRecordStatus = 'pending' | 'ready' | 'error';
 export type DNSRecordType = 'auto' | 'A' | 'AAAA' | 'CNAME';
 
 export interface DomainDNSRecord {
   id: string;
   domainId: string;
-  providerCredentialId: string;
+  hostedZoneId: string;
   recordType: DNSRecordType;
   ttl?: number;
   proxied: boolean;
   resolvedTarget?: string;
   status: DNSRecordStatus;
   statusMessage?: string;
-  endpointName?: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface DNSRecordInput {
-  providerCredentialId?: string;
+  hostedZoneId?: string;
   recordType?: DNSRecordType;
   ttl?: number;
   proxied?: boolean;
+}
+
+export interface DomainDNSRecordListItem extends DomainDNSRecord {
+  domainHostname: string;
+  zoneName: string;
+}
+
+// DNS Hosted Zone types
+export type DNSZoneStatus = 'pending' | 'ready' | 'error';
+
+export interface DNSHostedZone {
+  id: string;
+  name: string;
+  providerCredentialId: string;
+  status: DNSZoneStatus;
+  statusMessage?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // DNS Credential types

@@ -2,10 +2,10 @@ import apiClient from './client';
 import type { DomainTemplate, CreateDomainTemplateInput, PaginatedResponse, DomainTemplateManifests, DomainTemplatePreviewResult, DomainTemplateCreatePreviewResult, Domain } from '@/types';
 
 export const domainTemplatesApi = {
-  list: async (projectId: string, page = 1, limit = 20): Promise<PaginatedResponse<DomainTemplate>> => {
+  list: async (projectId: string, page = 1, limit = 20, capability?: 'domain' | 'stream'): Promise<PaginatedResponse<DomainTemplate>> => {
     const response = await apiClient.get<PaginatedResponse<DomainTemplate>>(
       `/projects/${projectId}/domain-templates`,
-      { params: { page, limit } }
+      { params: { page, limit, ...(capability ? { capability } : {}) } }
     );
     return response.data;
   },
