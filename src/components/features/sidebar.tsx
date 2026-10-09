@@ -24,6 +24,7 @@ import {
   Cloud,
   FileKey,
   ShieldCheck,
+  Waypoints,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { NotificationBell } from '@/components/features/notification-bell';
@@ -120,6 +121,9 @@ export function Sidebar({ projectId }: SidebarProps) {
     // resourcesNavItems.push({ href: `/projects/${projectId}/topology`, icon: Network, label: 'Topology' });
     // Domains - visible to all team members
     resourcesNavItems.push({ href: `/projects/${projectId}/domains`, icon: Globe, label: 'Domains' });
+
+    // Streams (L4 TCP/UDP) - visible to all team members, sibling of Domains
+    resourcesNavItems.push({ href: `/projects/${projectId}/streams`, icon: Waypoints, label: 'Streams' });
 
     // DNS Records - only for members who can manage domains (same gate as the DNS records API)
     if (permissions.canManageDomains) {

@@ -5,6 +5,7 @@ export { teamsApi, globalTeamsApi, projectTeamsApi } from './teams';
 export { presetsApi } from './presets';
 export { domainTemplatesApi } from './domainTemplates';
 export { domainsApi } from './domains';
+export { streamsApi } from './streams';
 export { routesApi } from './routes';
 export { approvalsApi } from './approvals';
 export { kubernetesApi } from './kubernetes';

@@ -279,6 +279,45 @@ export interface CreateDomainInput {
   dns?: { enabled: boolean; hostedZoneId?: string; recordType?: DNSRecordType; ttl?: number; proxied?: boolean };
 }
 
+// L4 Streams (TCP/UDP). A Stream owns a dedicated Gateway; L4 routes attach to it.
+export type StreamStatus = 'pending' | 'active' | 'error';
+
+export interface Stream {
+  id: string;
+  projectId: string;
+  name: string;
+  namespace: string;
+  gatewayTemplateId: string;
+  k8sGatewayName: string;
+  k8sGatewayClass: string;
+  status: StreamStatus;
+  statusMessage?: string;
+  /** External LB address (IP or hostname) of the stream's Gateway, when the backend exposes it. */
+  loadBalancerAddress?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateStreamInput {
+  name: string;
+  namespace: string;
+  gatewayTemplateId: string;
+}
+
+export interface UpdateStreamInput {
+  name?: string;
+}
+
+/** Minimal shape of an L4 route owned by a Stream (full L4 route model lands with the L4 route form). */
+export interface StreamRoute {
+  id: string;
+  streamId?: string;
+  name: string;
+  protocol: 'tcp' | 'udp' | string;
+  status: string;
+  config?: { listenerPort?: number };
+}
+
 export interface TLSSecretInfo {
   name: string;
   namespace: string;
