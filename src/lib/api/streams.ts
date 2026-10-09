@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { Stream, CreateStreamInput, UpdateStreamInput, StreamRoute, PaginatedResponse } from '@/types';
+import type { Stream, CreateStreamInput, UpdateStreamInput, StreamRoute, L4Metrics, PaginatedResponse } from '@/types';
 
 export const streamsApi = {
   list: async (projectId: string): Promise<{ data: Stream[] }> => {
@@ -32,6 +32,13 @@ export const streamsApi = {
       `/projects/${projectId}/streams/${streamId}/routes`,
       { params: { page, limit } }
     );
+    return response.data;
+  },
+
+  // Aggregate + per-listener L4 metrics. Backend returns 400 "not configured" when the
+  // project has no metrics endpoint.
+  getMetrics: async (projectId: string, streamId: string): Promise<L4Metrics> => {
+    const response = await apiClient.get<L4Metrics>(`/projects/${projectId}/streams/${streamId}/metrics`);
     return response.data;
   },
 };

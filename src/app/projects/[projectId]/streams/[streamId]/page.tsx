@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Trash2, AlertTriangle } from 'lucide-react';
 import { Button, Card, CardContent, Badge, Modal } from '@/components/ui';
 import { streamsApi, permissionsApi } from '@/lib/api';
+import { L4MetricsCard } from '@/components/metrics/L4MetricsCard';
 import type { Stream, StreamRoute, ProjectPermissions } from '@/types';
 
 export default function StreamDetailPage() {
@@ -195,6 +196,10 @@ export default function StreamDetailPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      <div className="mb-6">
+        <L4MetricsCard projectId={projectId} streamId={streamId} />
       </div>
 
       <Card>

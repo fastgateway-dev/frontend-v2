@@ -318,6 +318,27 @@ export interface StreamRoute {
   config?: { listenerPort?: number };
 }
 
+/** Per-listener L4 (TCP/UDP) metrics. L4 has no latency/error/RPS series. */
+export interface L4ListenerMetrics {
+  port: number;
+  protocol: 'tcp' | 'udp' | string;
+  activeConnections: number;
+  /** New connections per second. */
+  connectionRate: number;
+  bytesIn: number;
+  bytesOut: number;
+}
+
+/** Aggregate + per-listener metrics for a Stream. */
+export interface L4Metrics {
+  streamId: string;
+  listeners: L4ListenerMetrics[];
+  activeConnections: number;
+  connectionRate: number;
+  bytesIn: number;
+  bytesOut: number;
+}
+
 export interface TLSSecretInfo {
   name: string;
   namespace: string;

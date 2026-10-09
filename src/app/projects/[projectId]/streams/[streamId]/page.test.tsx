@@ -18,6 +18,7 @@ jest.mock('@/lib/api', () => ({
       ],
     }),
     delete: jest.fn(),
+    getMetrics: jest.fn().mockRejectedValue({ response: { status: 400, data: { error: 'not configured' } } }),
   },
   permissionsApi: { getProjectPermissions: jest.fn().mockResolvedValue({ canManageDomains: true }) },
 }));
