@@ -569,6 +569,8 @@ export interface DomainTemplate {
   containerResources?: ContainerResourcesConfig;
   scalingConfig?: ScalingConfig;
   mergeGateways: boolean;
+  enableDomain: boolean;
+  enableStream: boolean;
   telemetryAccessLog?: TelemetryAccessLogConfig | null;
   telemetryTracing?: TelemetryTracingConfig | null;
   telemetryMetrics?: TelemetryMetricsConfig | null;
@@ -600,6 +602,8 @@ export interface CreateDomainTemplateInput {
   containerResources?: ContainerResourcesConfig;
   scalingConfig?: ScalingConfig;
   mergeGateways?: boolean;
+  enableDomain?: boolean;
+  enableStream?: boolean;
   telemetryAccessLog?: TelemetryAccessLogConfig | null;
   telemetryTracing?: TelemetryTracingConfig | null;
   telemetryMetrics?: TelemetryMetricsConfig | null;

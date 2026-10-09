@@ -97,8 +97,8 @@ export default function DomainTemplatesPage() {
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Domain Templates</h1>
-          <p className="text-gray-600 mt-1">Manage domain templates for {project?.name}</p>
+          <h1 className="text-2xl font-bold text-gray-900">Gateway Templates</h1>
+          <p className="text-gray-600 mt-1">Manage gateway templates for {project?.name}</p>
         </div>
         <Link href={`/projects/${projectId}/domain-templates/create`}>
           <Button>
@@ -112,8 +112,8 @@ export default function DomainTemplatesPage() {
         <Card>
           <CardContent className="py-12 text-center">
             <Server className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No domain templates yet</h3>
-            <p className="text-gray-600 mb-4">Create a domain template to start configuring domains</p>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No gateway templates yet</h3>
+            <p className="text-gray-600 mb-4">Create a gateway template to start configuring domains and streams</p>
             <Link href={`/projects/${projectId}/domain-templates/create`}>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />

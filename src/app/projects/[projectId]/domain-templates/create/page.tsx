@@ -108,6 +108,8 @@ function buildCreateInput(data: FormValues, telemetry?: TelemetryState, scheduli
     containerResources,
     scalingConfig,
     mergeGateways: data.mergeGateways,
+    enableDomain: data.enableDomain,
+    enableStream: data.enableStream,
   };
 
   if (data.exposureType === 'LoadBalancer') {
@@ -192,6 +194,8 @@ export default function DomainTemplateCreatePage() {
       minReplicas: 2,
       maxReplicas: 10,
       mergeGateways: false,
+      enableDomain: true,
+      enableStream: false,
     },
   });
 
@@ -201,6 +205,9 @@ export default function DomainTemplateCreatePage() {
   const watchExposureType = watch('exposureType');
   const watchTlsMode = watch('tlsMode');
   const watchScalingType = watch('scalingType');
+  const watchEnableDomain = watch('enableDomain');
+  const watchEnableStream = watch('enableStream');
+  const noCapabilitySelected = !watchEnableDomain && !watchEnableStream;
 
   // Check AI status on mount
   useEffect(() => {
@@ -277,7 +284,7 @@ export default function DomainTemplateCreatePage() {
       router.push(`/projects/${projectId}/domain-templates`);
     } catch (err: unknown) {
       const errorObj = err as { response?: { data?: { error?: string } } };
-      setCreateError(errorObj.response?.data?.error || 'Failed to create domain template');
+      setCreateError(errorObj.response?.data?.error || 'Failed to create gateway template');
     } finally {
       setIsCreating(false);
     }
@@ -292,7 +299,7 @@ export default function DomainTemplateCreatePage() {
         <ArrowLeft className="h-4 w-4" />Back to Templates
       </Link>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Create Domain Template</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">Create Gateway Template</h1>
 
       {/* Error message */}
       {createError && (
@@ -301,7 +308,7 @@ export default function DomainTemplateCreatePage() {
             <div className="flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
               <div>
-                <h4 className="font-medium text-red-800">Failed to create domain template</h4>
+                <h4 className="font-medium text-red-800">Failed to create gateway template</h4>
                 <p className="mt-1 text-sm text-red-700 whitespace-pre-wrap">{createError}</p>
               </div>
             </div>
@@ -347,6 +354,37 @@ export default function DomainTemplateCreatePage() {
                   {...register('description')}
                 />
 
+                <div className="space-y-2">
+                  <span className="block text-sm font-medium text-gray-700">Capabilities</span>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      {...register('enableDomain')}
+                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Enable for Domains</span>
+                  </label>
+                  <p className="text-xs text-gray-500 ml-6">
+                    Domains (HTTP/HTTPS/gRPC routes) can use this template.
+                  </p>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      {...register('enableStream')}
+                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Enable for Streams</span>
+                  </label>
+                  <p className="text-xs text-gray-500 ml-6">
+                    Streams (TCP/UDP routes) can use this template.
+                  </p>
+                  {noCapabilitySelected && (
+                    <p className="text-sm text-red-600" role="alert">
+                      Select at least one capability: Domains or Streams.
+                    </p>
+                  )}
+                </div>
+
                 <Select
                   id="controllerName"
                   label="Controller"
@@ -382,17 +420,19 @@ export default function DomainTemplateCreatePage() {
                   </p>
                 </div>
 
-                <Select
-                  id="tlsMode"
-                  label="TLS"
-                  options={[
-                    { value: 'tls_only', label: 'TLS Only - HTTPS listener only' },
-                    { value: 'no_tls', label: 'No TLS - HTTP listener only' },
-                    { value: 'both', label: 'Both - HTTP and HTTPS listeners' },
-                  ]}
-                  {...register('tlsMode', { required: 'TLS mode is required' })}
-                  error={errors.tlsMode?.message}
-                />
+                {watchEnableDomain && (
+                  <Select
+                    id="tlsMode"
+                    label="TLS"
+                    options={[
+                      { value: 'tls_only', label: 'TLS Only - HTTPS listener only' },
+                      { value: 'no_tls', label: 'No TLS - HTTP listener only' },
+                      { value: 'both', label: 'Both - HTTP and HTTPS listeners' },
+                    ]}
+                    {...register('tlsMode', { required: 'TLS mode is required' })}
+                    error={errors.tlsMode?.message}
+                  />
+                )}
 
                 {/* Advanced Settings */}
                 <div className="border border-gray-200 rounded-lg">
@@ -407,7 +447,7 @@ export default function DomainTemplateCreatePage() {
 
                   {showAdvanced && (
                     <div className="px-4 pb-4 space-y-6 border-t border-gray-200 pt-4">
-                      {watchTlsMode !== 'tls_only' && (
+                      {watchEnableDomain && watchTlsMode !== 'tls_only' && (
                         <Input
                           id="httpPort"
                           label="HTTP Port"
@@ -422,7 +462,7 @@ export default function DomainTemplateCreatePage() {
                         />
                       )}
 
-                      {watchTlsMode !== 'no_tls' && (
+                      {watchEnableDomain && watchTlsMode !== 'no_tls' && (
                         <>
                           <Input
                             id="httpsPort"
@@ -650,7 +690,7 @@ export default function DomainTemplateCreatePage() {
 
                 <div className="p-4 bg-primary-50 border border-primary-200 rounded-lg">
                   <p className="text-sm text-primary-800">
-                    <strong>Note:</strong> Creating a domain template requires Envoy Gateway to be installed in your Kubernetes cluster.
+                    <strong>Note:</strong> Creating a gateway template requires Envoy Gateway to be installed in your Kubernetes cluster.
                     If not installed, please follow the{' '}
                     <a
                       href="https://gateway.envoyproxy.io/docs/tasks/quickstart/"
@@ -763,6 +803,7 @@ export default function DomainTemplateCreatePage() {
           variant="primary"
           onClick={handleSubmit(handleCreate)}
           isLoading={isCreating}
+          disabled={noCapabilitySelected}
         >
           Create Template
         </Button>

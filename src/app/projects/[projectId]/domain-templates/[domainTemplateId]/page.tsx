@@ -61,7 +61,7 @@ export default function DomainTemplateDetailPage() {
     } catch (err: unknown) {
       const errorObj = err as { response?: { data?: { error?: string } } };
       console.error('Failed to load data:', err);
-      setError(errorObj.response?.data?.error || 'Failed to load domain template');
+      setError(errorObj.response?.data?.error || 'Failed to load gateway template');
     } finally {
       setIsLoading(false);
     }
@@ -76,7 +76,7 @@ export default function DomainTemplateDetailPage() {
     } catch (err: unknown) {
       const errorObj = err as { response?: { data?: { error?: string } } };
       console.error('Failed to delete:', err);
-      setError(errorObj.response?.data?.error || 'Failed to delete domain template');
+      setError(errorObj.response?.data?.error || 'Failed to delete gateway template');
     } finally {
       setIsDeleting(false);
       setShowDeleteModal(false);
@@ -146,7 +146,7 @@ export default function DomainTemplateDetailPage() {
     <div className="p-8">
       {/* Back link */}
       <Link href={`/projects/${projectId}/domain-templates`} className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-4">
-        <ArrowLeft className="h-4 w-4" />Back to Domain Templates
+        <ArrowLeft className="h-4 w-4" />Back to Gateway Templates
       </Link>
 
       {/* Header with name, badges, and Edit/Delete buttons */}
@@ -427,10 +427,10 @@ export default function DomainTemplateDetailPage() {
       </Tabs>
 
       {/* Delete Modal */}
-      <Modal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Delete Domain Template">
+      <Modal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Delete Gateway Template">
         <div className="space-y-4">
           <p className="text-gray-600">
-            Are you sure you want to delete the domain template <span className="font-semibold">{template.name}</span>?
+            Are you sure you want to delete the gateway template <span className="font-semibold">{template.name}</span>?
           </p>
           {domains.length > 0 && (
             <p className="text-sm text-red-600">Warning: {domains.length} domain(s) are using this template. They may stop working.</p>
