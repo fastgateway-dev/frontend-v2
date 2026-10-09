@@ -79,6 +79,8 @@ export default function CreateStreamPage() {
     }
   };
 
+  const usableTemplates = templates.filter((t) => t.status === 'active');
+
   if (isLoading) {
     return (
       <div className="p-8">
@@ -107,7 +109,7 @@ export default function CreateStreamPage() {
       <Card>
         <CardContent>
           <div className="space-y-4 pt-6">
-            {templates.length === 0 ? (
+            {usableTemplates.length === 0 ? (
               <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -134,12 +136,10 @@ export default function CreateStreamPage() {
                   }}
                   options={[
                     { value: '', label: 'Select a gateway template...' },
-                    ...templates
-                      .filter((t) => t.status === 'active')
-                      .map((t) => ({
-                        value: t.id,
-                        label: `${t.name} (${t.exposureType})`,
-                      })),
+                    ...usableTemplates.map((t) => ({
+                      value: t.id,
+                      label: `${t.name} (${t.exposureType})`,
+                    })),
                   ]}
                   error={formErrors.template}
                 />

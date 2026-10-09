@@ -142,6 +142,10 @@ export default function DomainTemplateDetailPage() {
     );
   }
 
+  // Backward-compat: templates without the flag are domain-enabled
+  const domainEnabled = template.enableDomain ?? true;
+  const streamEnabled = template.enableStream ?? false;
+
   return (
     <div className="p-8">
       {/* Back link */}
@@ -160,7 +164,7 @@ export default function DomainTemplateDetailPage() {
               <h1 className="text-2xl font-bold text-gray-900">{template.name}</h1>
               {getStatusBadge(template.status)}
               {getExposureBadge(template.exposureType)}
-              {getTlsModeBadge(template.tlsMode)}
+              {domainEnabled && getTlsModeBadge(template.tlsMode)}
               {template.mergeGateways && (
                 <Badge variant="info" className="flex items-center gap-1">Merged</Badge>
               )}
@@ -209,13 +213,17 @@ export default function DomainTemplateDetailPage() {
                   <div><span className="text-gray-500">Name:</span> <span className="font-medium">{template.name}</span></div>
                   <div><span className="text-gray-500">Controller:</span> <span className="font-medium">{template.controllerName}</span></div>
                   <div><span className="text-gray-500">Service Type:</span> <span className="font-medium">{template.exposureType}</span></div>
-                  <div><span className="text-gray-500">TLS Mode:</span> <span className="font-medium capitalize">{template.tlsMode.replace('_', ' ')}</span></div>
+                  <div><span className="text-gray-500">Capabilities:</span> <span className="font-medium">{[domainEnabled && 'Domains', streamEnabled && 'Streams'].filter(Boolean).join(', ') || 'None'}</span></div>
+                  {domainEnabled && (
+                    <div><span className="text-gray-500">TLS Mode:</span> <span className="font-medium capitalize">{template.tlsMode.replace('_', ' ')}</span></div>
+                  )}
                   <div><span className="text-gray-500">Merge Gateways:</span> <span className="font-medium">{template.mergeGateways ? 'Enabled' : 'Disabled'}</span></div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Port Configuration card */}
+            {/* Port Configuration card (domain-only) */}
+            {domainEnabled && (
             <Card>
               <CardContent className="py-4">
                 <h3 className="font-semibold text-gray-900 mb-4">Port Configuration</h3>
@@ -232,6 +240,7 @@ export default function DomainTemplateDetailPage() {
                 </div>
               </CardContent>
             </Card>
+            )}
 
             {/* Service Settings card */}
             {(template.externalTrafficPolicy || template.loadBalancerClass || Object.keys(template.annotations || {}).length > 0) && (

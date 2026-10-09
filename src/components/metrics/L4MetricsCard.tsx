@@ -45,12 +45,12 @@ export function L4MetricsCard({ projectId, streamId }: L4MetricsCardProps) {
       setNotConfigured(false);
     } catch (err: unknown) {
       if (controller.signal.aborted) return;
-      const e = err as { response?: { status?: number; data?: { error?: string } }; message?: string };
+      const e = err as { response?: { status?: number; data?: { error?: string; message?: string } }; message?: string };
       if (e.response?.status === 400) {
         // Project has no metrics endpoint configured: informational, not an error.
         setNotConfigured(true);
       } else {
-        setError(e.response?.data?.error || e.message || 'Failed to load metrics');
+        setError(e.response?.data?.message || e.response?.data?.error || e.message || 'Failed to load metrics');
       }
     } finally {
       if (!controller.signal.aborted) setLoading(false);

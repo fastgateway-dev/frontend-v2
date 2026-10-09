@@ -1342,7 +1342,8 @@ export interface BackendTrafficPolicyInput {
 
 export interface Route {
   id: string;
-  domainId: string;
+  /** Absent/null for L4 (tcp/udp) routes, which belong to a Stream instead. */
+  domainId?: string;
   /** Owning Stream for L4 (tcp/udp) routes; such routes have no domain. */
   streamId?: string;
   teamId: string;

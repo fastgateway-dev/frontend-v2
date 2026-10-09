@@ -39,7 +39,8 @@ test('handles empty/zero values', async () => {
 });
 
 test('shows an error for non-400 failures', async () => {
-  getMetrics.mockRejectedValue({ response: { status: 500, data: { error: 'boom' } } });
+  getMetrics.mockRejectedValue({ response: { status: 500, data: { error: 'metrics_unavailable', message: 'boom' } } });
   render(<L4MetricsCard projectId="p1" streamId="s1" />);
   expect(await screen.findByText('boom')).toBeInTheDocument();
+  expect(screen.queryByText('metrics_unavailable')).toBeNull();
 });
