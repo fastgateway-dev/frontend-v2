@@ -135,9 +135,9 @@ export function Sidebar({ projectId }: SidebarProps) {
       resourcesNavItems.push({ href: `/projects/${projectId}/certificates`, icon: FileKey, label: 'Certificates' });
     }
 
-    // Domain Templates - only for Owner/Project Admin
+    // Gateway Templates - only for Owner/Project Admin
     if (permissions.canManageDomainTemplates) {
-      resourcesNavItems.push({ href: `/projects/${projectId}/domain-templates`, icon: Server, label: 'Domain Templates' });
+      resourcesNavItems.push({ href: `/projects/${projectId}/domain-templates`, icon: Server, label: 'Gateway Templates' });
     }
 
     // Namespaces - only for Owner/Project Admin (can manage domains = can manage namespaces)
