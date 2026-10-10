@@ -242,8 +242,6 @@ export interface UpdateTeamPresetsInput {
 }
 
 // Domain types
-export type TLSPolicy = 'terminate' | 'passthrough';
-export type TLSMode = 'tls_only' | 'no_tls' | 'both';
 export type DomainStatus = 'pending' | 'active' | 'error';
 
 // Gateway template listener model
@@ -265,14 +263,10 @@ export interface Domain {
   domainTemplateId?: string;
   name: string;
   hostname: string;
-  httpPort: number;
-  httpsPort: number;
-  tlsMode: TLSMode;
   tlsSecretName: string;
   tlsSecretNamespace?: string;
   namespace: string;
-  tlsPolicy: TLSPolicy;
-  boundListeners?: string[];
+  boundListeners: string[];
   status: DomainStatus;
   statusMessage?: string;
   routeCount: number;
@@ -289,7 +283,7 @@ export interface CreateDomainInput {
   tlsSecretName?: string;
   tlsSecretNamespace?: string;
   namespace?: string;
-  boundListeners?: string[];
+  boundListeners: string[];
   labels?: Record<string, string>;
   dns?: { enabled: boolean; hostedZoneId?: string; recordType?: DNSRecordType; ttl?: number; proxied?: boolean };
 }
@@ -633,11 +627,7 @@ export interface DomainTemplate {
   description: string;
   controllerName: string;
   exposureType: ExposureType;
-  tlsMode: TLSMode;
-  httpPort: number;
-  httpsPort: number;
-  tlsPolicy: TLSPolicy;
-  listeners?: TemplateListener[];
+  listeners: TemplateListener[];
   externalTrafficPolicy?: ExternalTrafficPolicy;
   loadBalancerClass?: string;
   annotations: Record<string, string>;
@@ -645,8 +635,6 @@ export interface DomainTemplate {
   containerResources?: ContainerResourcesConfig;
   scalingConfig?: ScalingConfig;
   mergeGateways: boolean;
-  enableDomain: boolean;
-  enableStream: boolean;
   telemetryAccessLog?: TelemetryAccessLogConfig | null;
   telemetryTracing?: TelemetryTracingConfig | null;
   telemetryMetrics?: TelemetryMetricsConfig | null;
@@ -666,12 +654,8 @@ export interface CreateDomainTemplateInput {
   description?: string;
   controllerName?: string;
   exposureType: ExposureType;
-  tlsMode?: TLSMode; // deprecated: superseded by listeners
-  listeners?: TemplateListener[];
+  listeners: TemplateListener[];
   // Advanced settings
-  httpPort?: number;
-  httpsPort?: number;
-  tlsPolicy?: TLSPolicy;
   externalTrafficPolicy?: ExternalTrafficPolicy;
   loadBalancerClass?: string;
   annotations?: Record<string, string>;
@@ -679,8 +663,6 @@ export interface CreateDomainTemplateInput {
   containerResources?: ContainerResourcesConfig;
   scalingConfig?: ScalingConfig;
   mergeGateways?: boolean;
-  enableDomain?: boolean;
-  enableStream?: boolean;
   telemetryAccessLog?: TelemetryAccessLogConfig | null;
   telemetryTracing?: TelemetryTracingConfig | null;
   telemetryMetrics?: TelemetryMetricsConfig | null;
