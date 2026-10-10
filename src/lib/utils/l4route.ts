@@ -98,6 +98,16 @@ export function findPortCollision(
   return hit ? { routeId: hit.id, routeName: hit.name, port, protocol } : null;
 }
 
+/** True iff min <= port <= max (purely numeric; the range comes from the caller). */
+export function portInRange(port: number, min: number, max: number): boolean {
+  return port >= min && port <= max;
+}
+
+/** Null when the port is within [min, max]; otherwise a message naming both bounds. */
+export function rangeError(port: number, min: number, max: number): string | null {
+  return portInRange(port, min, max) ? null : `Listener port must be between ${min} and ${max}`;
+}
+
 const toInt = (s: string): number | undefined => {
   if (s.trim() === '') return undefined;
   const n = Number(s);
