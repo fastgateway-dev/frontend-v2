@@ -16,12 +16,13 @@ import { TolerationsEditor } from '@/components/scheduling/TolerationsEditor';
 import { TopologySpreadEditor } from '@/components/scheduling/TopologySpreadEditor';
 import { PdbEditor } from '@/components/scheduling/PdbEditor';
 import { DeploymentStrategyEditor } from '@/components/scheduling/DeploymentStrategyEditor';
+import { GatewayTemplateListenerForm, fixedPortsValid } from '@/components/features/GatewayTemplateListenerForm';
+import { canSubmitTemplate } from '@/lib/utils/gateway-listeners';
 import { domainTemplatesApi } from '@/lib/api';
 import type {
   CreateDomainTemplateInput,
   ExposureType,
-  TLSMode,
-  TLSPolicy,
+  TemplateListener,
   ExternalTrafficPolicy,
   ScalingType,
   AIReviewResult,
@@ -36,7 +37,7 @@ import type {
 
 const ENVOY_GATEWAY_CONTROLLER = 'gateway.envoyproxy.io/gatewayclass-controller';
 
-interface FormValues extends Omit<CreateDomainTemplateInput, 'annotations' | 'podAnnotations' | 'containerResources' | 'scalingConfig'> {
+interface FormValues extends Omit<CreateDomainTemplateInput, 'annotations' | 'podAnnotations' | 'containerResources' | 'scalingConfig' | 'listeners'> {
   annotationsList: Array<{ key: string; value: string }>;
   podAnnotationsList: Array<{ key: string; value: string }>;
   cpuRequest: string;
@@ -61,7 +62,12 @@ interface SchedulingState {
   deploymentStrategy: DeploymentStrategyConfig | null;
 }
 
-function buildCreateInput(data: FormValues, telemetry?: TelemetryState, scheduling?: SchedulingState): CreateDomainTemplateInput {
+const DEFAULT_LISTENERS: TemplateListener[] = [
+  { name: 'http', protocol: 'HTTP', port: 80 },
+  { name: 'https', protocol: 'HTTPS', port: 443, tlsMode: 'Terminate' },
+];
+
+function buildCreateInput(data: FormValues, listeners: TemplateListener[], telemetry?: TelemetryState, scheduling?: SchedulingState): CreateDomainTemplateInput {
   const annotations: Record<string, string> = {};
   data.annotationsList.forEach(({ key, value }) => {
     if (key && value) {
@@ -99,17 +105,12 @@ function buildCreateInput(data: FormValues, telemetry?: TelemetryState, scheduli
     description: data.description,
     controllerName: data.controllerName,
     exposureType: data.exposureType as ExposureType,
-    tlsMode: data.tlsMode as TLSMode,
-    httpPort: data.httpPort,
-    httpsPort: data.httpsPort,
-    tlsPolicy: data.tlsPolicy as TLSPolicy,
+    listeners,
     annotations: Object.keys(annotations).length > 0 ? annotations : undefined,
     podAnnotations: Object.keys(podAnnotations).length > 0 ? podAnnotations : undefined,
     containerResources,
     scalingConfig,
     mergeGateways: data.mergeGateways,
-    enableDomain: data.enableDomain,
-    enableStream: data.enableStream,
   };
 
   if (data.exposureType === 'LoadBalancer') {
@@ -163,6 +164,10 @@ export default function DomainTemplateCreatePage() {
   // Advanced settings toggle
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Listener state (managed separately from react-hook-form)
+  const [listeners, setListeners] = useState<TemplateListener[]>(DEFAULT_LISTENERS);
+  const listenersValid = canSubmitTemplate(listeners) && fixedPortsValid(listeners);
+
   // Telemetry state (managed separately from react-hook-form)
   const [telemetryAccessLog, setTelemetryAccessLog] = useState<TelemetryAccessLogConfig | null>(null);
   const [telemetryTracing, setTelemetryTracing] = useState<TelemetryTracingConfig | null>(null);
@@ -179,10 +184,6 @@ export default function DomainTemplateCreatePage() {
       description: '',
       controllerName: ENVOY_GATEWAY_CONTROLLER,
       exposureType: 'LoadBalancer',
-      tlsMode: 'tls_only',
-      httpPort: 80,
-      httpsPort: 443,
-      tlsPolicy: 'terminate',
       annotationsList: [],
       podAnnotationsList: [],
       cpuRequest: '',
@@ -194,8 +195,6 @@ export default function DomainTemplateCreatePage() {
       minReplicas: 2,
       maxReplicas: 10,
       mergeGateways: false,
-      enableDomain: true,
-      enableStream: false,
     },
   });
 
@@ -203,11 +202,7 @@ export default function DomainTemplateCreatePage() {
   const { fields: podAnnotationFields, append: appendPodAnnotation, remove: removePodAnnotation } = useFieldArray({ control, name: 'podAnnotationsList' });
 
   const watchExposureType = watch('exposureType');
-  const watchTlsMode = watch('tlsMode');
   const watchScalingType = watch('scalingType');
-  const watchEnableDomain = watch('enableDomain');
-  const watchEnableStream = watch('enableStream');
-  const noCapabilitySelected = !watchEnableDomain && !watchEnableStream;
 
   // Check AI status on mount
   useEffect(() => {
@@ -231,11 +226,17 @@ export default function DomainTemplateCreatePage() {
     setAiReviewResult(null);
     setAiReviewError(null);
 
+    if (!listenersValid) {
+      setPreviewError('Fix the listener errors on the Settings tab before previewing.');
+      setIsLoadingPreview(false);
+      return;
+    }
+
     try {
       const values = getValues();
       const telemetry = { accessLog: telemetryAccessLog, tracing: telemetryTracing, metrics: telemetryMetrics };
       const scheduling = { podPlacement, pdbConfig, deploymentStrategy };
-      const input = buildCreateInput(values, telemetry, scheduling);
+      const input = buildCreateInput(values, listeners, telemetry, scheduling);
       const result = await domainTemplatesApi.previewCreate(projectId, input);
       setPreviewResult(result);
     } catch (err: unknown) {
@@ -255,7 +256,7 @@ export default function DomainTemplateCreatePage() {
       const values = getValues();
       const telemetry = { accessLog: telemetryAccessLog, tracing: telemetryTracing, metrics: telemetryMetrics };
       const scheduling = { podPlacement, pdbConfig, deploymentStrategy };
-      const input = buildCreateInput(values, telemetry, scheduling);
+      const input = buildCreateInput(values, listeners, telemetry, scheduling);
       const result = await domainTemplatesApi.previewCreate(projectId, input, {
         includeAIReview: true,
         changeDescription: changeDescription || undefined,
@@ -279,7 +280,7 @@ export default function DomainTemplateCreatePage() {
       const values = getValues();
       const telemetry = { accessLog: telemetryAccessLog, tracing: telemetryTracing, metrics: telemetryMetrics };
       const scheduling = { podPlacement, pdbConfig, deploymentStrategy };
-      const input = buildCreateInput(values, telemetry, scheduling);
+      const input = buildCreateInput(values, listeners, telemetry, scheduling);
       await domainTemplatesApi.create(projectId, input);
       router.push(`/projects/${projectId}/domain-templates`);
     } catch (err: unknown) {
@@ -354,37 +355,6 @@ export default function DomainTemplateCreatePage() {
                   {...register('description')}
                 />
 
-                <div className="space-y-2">
-                  <span className="block text-sm font-medium text-gray-700">Capabilities</span>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      {...register('enableDomain')}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700">Enable for Domains</span>
-                  </label>
-                  <p className="text-xs text-gray-500 ml-6">
-                    Domains (HTTP/HTTPS/gRPC routes) can use this template.
-                  </p>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      {...register('enableStream')}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700">Enable for Streams</span>
-                  </label>
-                  <p className="text-xs text-gray-500 ml-6">
-                    Streams (TCP/UDP routes) can use this template.
-                  </p>
-                  {noCapabilitySelected && (
-                    <p className="text-sm text-red-600" role="alert">
-                      Select at least one capability: Domains or Streams.
-                    </p>
-                  )}
-                </div>
-
                 <Select
                   id="controllerName"
                   label="Controller"
@@ -420,19 +390,14 @@ export default function DomainTemplateCreatePage() {
                   </p>
                 </div>
 
-                {watchEnableDomain && (
-                  <Select
-                    id="tlsMode"
-                    label="TLS"
-                    options={[
-                      { value: 'tls_only', label: 'TLS Only - HTTPS listener only' },
-                      { value: 'no_tls', label: 'No TLS - HTTP listener only' },
-                      { value: 'both', label: 'Both - HTTP and HTTPS listeners' },
-                    ]}
-                    {...register('tlsMode', { required: 'TLS mode is required' })}
-                    error={errors.tlsMode?.message}
-                  />
-                )}
+                {/* Listeners */}
+                <div className="space-y-2">
+                  <h2 className="text-base font-semibold text-gray-900">Listeners</h2>
+                  <p className="text-sm text-gray-500">
+                    Define the ports this gateway exposes. Domains can bind the HTTP/HTTPS listeners; streams use the TCP/UDP range.
+                  </p>
+                  <GatewayTemplateListenerForm value={listeners} onChange={setListeners} />
+                </div>
 
                 {/* Advanced Settings */}
                 <div className="border border-gray-200 rounded-lg">
@@ -447,49 +412,6 @@ export default function DomainTemplateCreatePage() {
 
                   {showAdvanced && (
                     <div className="px-4 pb-4 space-y-6 border-t border-gray-200 pt-4">
-                      {watchEnableDomain && watchTlsMode !== 'tls_only' && (
-                        <Input
-                          id="httpPort"
-                          label="HTTP Port"
-                          type="number"
-                          placeholder="80"
-                          {...register('httpPort', {
-                            min: { value: 1, message: 'Port must be at least 1' },
-                            max: { value: 65535, message: 'Port must be at most 65535' },
-                            valueAsNumber: true,
-                          })}
-                          error={errors.httpPort?.message}
-                        />
-                      )}
-
-                      {watchEnableDomain && watchTlsMode !== 'no_tls' && (
-                        <>
-                          <Input
-                            id="httpsPort"
-                            label="HTTPS Port"
-                            type="number"
-                            placeholder="443"
-                            {...register('httpsPort', {
-                              min: { value: 1, message: 'Port must be at least 1' },
-                              max: { value: 65535, message: 'Port must be at most 65535' },
-                              valueAsNumber: true,
-                            })}
-                            error={errors.httpsPort?.message}
-                          />
-
-                          <Select
-                            id="tlsPolicy"
-                            label="TLS Policy"
-                            options={[
-                              { value: 'terminate', label: 'Terminate - TLS terminates at the gateway' },
-                              { value: 'passthrough', label: 'Passthrough - TLS passes through to backend' },
-                            ]}
-                            {...register('tlsPolicy')}
-                            error={errors.tlsPolicy?.message}
-                          />
-                        </>
-                      )}
-
                       {watchExposureType === 'LoadBalancer' && (
                         <>
                           <Select
@@ -803,7 +725,7 @@ export default function DomainTemplateCreatePage() {
           variant="primary"
           onClick={handleSubmit(handleCreate)}
           isLoading={isCreating}
-          disabled={noCapabilitySelected}
+          disabled={!listenersValid}
         >
           Create Template
         </Button>

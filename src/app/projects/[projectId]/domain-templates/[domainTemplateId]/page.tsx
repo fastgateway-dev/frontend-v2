@@ -14,7 +14,8 @@ import { TopologySpreadEditor } from '@/components/scheduling/TopologySpreadEdit
 import { PdbEditor } from '@/components/scheduling/PdbEditor';
 import { DeploymentStrategyEditor } from '@/components/scheduling/DeploymentStrategyEditor';
 import { domainTemplatesApi, permissionsApi } from '@/lib/api';
-import type { DomainTemplate, Domain, ProjectPermissions, ExposureType, TLSMode } from '@/types';
+import { hostnameListeners, streamListener } from '@/lib/utils/gateway-listeners';
+import type { DomainTemplate, Domain, ProjectPermissions, ExposureType } from '@/types';
 
 export default function DomainTemplateDetailPage() {
   const params = useParams();
@@ -103,15 +104,6 @@ export default function DomainTemplateDetailPage() {
     }
   };
 
-  const getTlsModeBadge = (tlsMode: TLSMode) => {
-    switch (tlsMode) {
-      case 'tls_only': return <Badge variant="success">TLS Only</Badge>;
-      case 'no_tls': return <Badge variant="warning">No TLS</Badge>;
-      case 'both': return <Badge variant="info">HTTP + HTTPS</Badge>;
-      default: return <Badge variant="default">{tlsMode}</Badge>;
-    }
-  };
-
   // Loading state
   if (isLoading) {
     return (
@@ -142,9 +134,10 @@ export default function DomainTemplateDetailPage() {
     );
   }
 
-  // Backward-compat: templates without the flag are domain-enabled
-  const domainEnabled = template.enableDomain ?? true;
-  const streamEnabled = template.enableStream ?? false;
+  // Eligibility is inferred from the listeners
+  const templateListeners = template.listeners ?? [];
+  const domainEnabled = hostnameListeners(templateListeners).length > 0;
+  const streamEnabled = streamListener(templateListeners) !== null;
 
   return (
     <div className="p-8">
@@ -164,7 +157,8 @@ export default function DomainTemplateDetailPage() {
               <h1 className="text-2xl font-bold text-gray-900">{template.name}</h1>
               {getStatusBadge(template.status)}
               {getExposureBadge(template.exposureType)}
-              {domainEnabled && getTlsModeBadge(template.tlsMode)}
+              {domainEnabled && <Badge variant="success">Domain</Badge>}
+              {streamEnabled && <Badge variant="info">Stream</Badge>}
               {template.mergeGateways && (
                 <Badge variant="info" className="flex items-center gap-1">Merged</Badge>
               )}
@@ -214,33 +208,45 @@ export default function DomainTemplateDetailPage() {
                   <div><span className="text-gray-500">Controller:</span> <span className="font-medium">{template.controllerName}</span></div>
                   <div><span className="text-gray-500">Service Type:</span> <span className="font-medium">{template.exposureType}</span></div>
                   <div><span className="text-gray-500">Capabilities:</span> <span className="font-medium">{[domainEnabled && 'Domains', streamEnabled && 'Streams'].filter(Boolean).join(', ') || 'None'}</span></div>
-                  {domainEnabled && (
-                    <div><span className="text-gray-500">TLS Mode:</span> <span className="font-medium capitalize">{template.tlsMode.replace('_', ' ')}</span></div>
-                  )}
                   <div><span className="text-gray-500">Merge Gateways:</span> <span className="font-medium">{template.mergeGateways ? 'Enabled' : 'Disabled'}</span></div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Port Configuration card (domain-only) */}
-            {domainEnabled && (
+            {/* Listeners card */}
             <Card>
               <CardContent className="py-4">
-                <h3 className="font-semibold text-gray-900 mb-4">Port Configuration</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  {template.tlsMode !== 'tls_only' && (
-                    <div><span className="text-gray-500">HTTP Port:</span> <span className="font-medium">{template.httpPort}</span></div>
-                  )}
-                  {template.tlsMode !== 'no_tls' && (
-                    <>
-                      <div><span className="text-gray-500">HTTPS Port:</span> <span className="font-medium">{template.httpsPort}</span></div>
-                      <div><span className="text-gray-500">TLS Policy:</span> <span className="font-medium capitalize">{template.tlsPolicy}</span></div>
-                    </>
-                  )}
-                </div>
+                <h3 className="font-semibold text-gray-900 mb-4">Listeners</h3>
+                {templateListeners.length === 0 ? (
+                  <p className="text-sm text-gray-500">No listeners configured.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-500">
+                          <th className="pb-2 pr-4 font-medium">Name</th>
+                          <th className="pb-2 pr-4 font-medium">Protocol</th>
+                          <th className="pb-2 pr-4 font-medium">Port</th>
+                          <th className="pb-2 font-medium">TLS Mode</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {templateListeners.map((l) => (
+                          <tr key={l.name} className="border-t border-gray-100">
+                            <td className="py-2 pr-4 font-medium">{l.name}</td>
+                            <td className="py-2 pr-4">{l.protocol === 'TCP' || l.protocol === 'UDP' ? 'TCP/UDP' : l.protocol}</td>
+                            <td className="py-2 pr-4 font-mono">
+                              {l.protocol === 'TCP' || l.protocol === 'UDP' ? `${l.portRangeMin}-${l.portRangeMax}` : l.port}
+                            </td>
+                            <td className="py-2">{l.tlsMode ?? '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
-            )}
 
             {/* Service Settings card */}
             {(template.externalTrafficPolicy || template.loadBalancerClass || Object.keys(template.annotations || {}).length > 0) && (

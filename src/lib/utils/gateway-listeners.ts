@@ -79,3 +79,10 @@ export function domainNeedsTLSSecret(boundNames: string[], listeners: TemplateLi
     (l) => boundNames.includes(l.name) && l.protocol === 'HTTPS' && l.tlsMode !== 'Passthrough'
   );
 }
+
+/** Short display label, e.g. "HTTP:80", "HTTPS:443 (Terminate)", "TCP/UDP 9000-9100". */
+export function listenerLabel(l: TemplateListener): string {
+  if (isStream(l)) return `TCP/UDP ${l.portRangeMin}-${l.portRangeMax}`;
+  const base = `${l.protocol}:${l.port}`;
+  return l.tlsMode ? `${base} (${l.tlsMode})` : base;
+}

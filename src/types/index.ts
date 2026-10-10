@@ -666,7 +666,7 @@ export interface CreateDomainTemplateInput {
   description?: string;
   controllerName?: string;
   exposureType: ExposureType;
-  tlsMode: TLSMode;
+  tlsMode?: TLSMode; // deprecated: superseded by listeners
   listeners?: TemplateListener[];
   // Advanced settings
   httpPort?: number;
