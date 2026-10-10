@@ -196,9 +196,11 @@ export default function DomainsPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold text-gray-900">{domain.hostname}</h3>
-                          <span className="text-gray-500">
-                            {domain.tlsMode !== 'no_tls' ? `:${domain.httpsPort}` : `:${domain.httpPort}`}
-                          </span>
+                          {(domain.boundListeners ?? []).map((name) => (
+                            <span key={name} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-gray-100 text-gray-700 border border-gray-200">
+                              {name}
+                            </span>
+                          ))}
                           {getStatusBadge(domain.status)}
                           {domain.namespace && domain.namespace !== 'fastgateway-system' && (
                             <Badge variant="info">{domain.namespace}</Badge>

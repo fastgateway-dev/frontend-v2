@@ -181,9 +181,7 @@ export default function DomainDetailPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{domain?.hostname}</h1>
           <p className="text-gray-600 mt-1">
-            {domain?.tlsMode !== 'tls_only' && `HTTP: ${domain?.httpPort}`}
-            {domain?.tlsMode === 'both' && ' · '}
-            {domain?.tlsMode !== 'no_tls' && `HTTPS: ${domain?.httpsPort}`}
+            {`Listeners: ${(domain?.boundListeners ?? []).length > 0 ? (domain?.boundListeners ?? []).join(', ') : 'None'}`}
             {' · TLS: '}{domain?.tlsSecretName
               ? `${domain.tlsSecretName}${domain.tlsSecretNamespace && domain.tlsSecretNamespace !== 'fastgateway-system' ? ` (${domain.tlsSecretNamespace})` : ''}`
               : 'None'}
@@ -432,7 +430,7 @@ export default function DomainDetailPage() {
                   <Accordion type="multiple" defaultValue={['tls-certificate', 'dns-record', 'client-settings', 'backend-settings', 'extensions']}>
                     {/* TLS Certificate (read-only) — the secret this domain serves.
                         Edit it from the "Edit Settings" button above. */}
-                    {domain?.tlsMode !== 'no_tls' && (
+                    {!!domain?.tlsSecretName && (
                       <AccordionItem value="tls-certificate">
                         <AccordionTrigger value="tls-certificate">
                           <div className="flex items-center gap-2">
