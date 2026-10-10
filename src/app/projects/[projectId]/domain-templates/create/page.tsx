@@ -16,7 +16,7 @@ import { TolerationsEditor } from '@/components/scheduling/TolerationsEditor';
 import { TopologySpreadEditor } from '@/components/scheduling/TopologySpreadEditor';
 import { PdbEditor } from '@/components/scheduling/PdbEditor';
 import { DeploymentStrategyEditor } from '@/components/scheduling/DeploymentStrategyEditor';
-import { GatewayTemplateListenerForm, fixedPortsValid } from '@/components/features/GatewayTemplateListenerForm';
+import { GatewayTemplateListenerForm } from '@/components/features/GatewayTemplateListenerForm';
 import { canSubmitTemplate } from '@/lib/utils/gateway-listeners';
 import { domainTemplatesApi } from '@/lib/api';
 import type {
@@ -166,7 +166,7 @@ export default function DomainTemplateCreatePage() {
 
   // Listener state (managed separately from react-hook-form)
   const [listeners, setListeners] = useState<TemplateListener[]>(DEFAULT_LISTENERS);
-  const listenersValid = canSubmitTemplate(listeners) && fixedPortsValid(listeners);
+  const listenersValid = canSubmitTemplate(listeners);
 
   // Telemetry state (managed separately from react-hook-form)
   const [telemetryAccessLog, setTelemetryAccessLog] = useState<TelemetryAccessLogConfig | null>(null);

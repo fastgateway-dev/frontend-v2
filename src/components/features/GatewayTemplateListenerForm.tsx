@@ -2,7 +2,7 @@
 
 import { Plus, Trash2 } from 'lucide-react';
 import { Badge, Button, Input, Select } from '@/components/ui';
-import { groupListeners, listenerPortConflict } from '@/lib/utils/gateway-listeners';
+import { groupListeners, listenerIssue } from '@/lib/utils/gateway-listeners';
 import type { ListenerProtocol, TemplateListener } from '@/types';
 
 export interface GatewayTemplateListenerFormProps {
@@ -13,20 +13,6 @@ export interface GatewayTemplateListenerFormProps {
 
 const STREAM_LISTENER_NAME = 'tcpudp';
 const DEFAULT_RANGE = { min: 9000, max: 9100 };
-
-const isValidPort = (n: number | undefined): boolean =>
-  typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 65535;
-
-/**
- * True when every fixed-port (HTTP/HTTPS/TLS) listener has a port in 1-65535.
- * canSubmitTemplate skips listeners without a port, so parents gate submit on
- * this as well.
- */
-export function fixedPortsValid(listeners: TemplateListener[]): boolean {
-  return listeners
-    .filter((l) => l.protocol !== 'TCP' && l.protocol !== 'UDP')
-    .every((l) => isValidPort(l.port));
-}
 
 function nextListenerName(listeners: TemplateListener[], prefix: string): string {
   const taken = new Set(listeners.map((l) => l.name));
@@ -50,7 +36,7 @@ function parsePort(raw: string): number | undefined {
 
 export function GatewayTemplateListenerForm({ value, onChange, disabled = false }: GatewayTemplateListenerFormProps) {
   const { http, tls, stream } = groupListeners(value);
-  const conflict = listenerPortConflict(value);
+  const issue = listenerIssue(value);
 
   const replace = (target: TemplateListener, next: TemplateListener) =>
     onChange(value.map((l) => (l === target ? next : l)));
@@ -124,8 +110,7 @@ export function GatewayTemplateListenerForm({ value, onChange, disabled = false 
                 placeholder="Port"
                 value={l.port ?? ''}
                 disabled={disabled}
-                error={isValidPort(l.port) ? undefined : '1-65535'}
-                onChange={(e) => replace(l, { ...l, port: parsePort(e.target.value) })}
+                                onChange={(e) => replace(l, { ...l, port: parsePort(e.target.value) })}
               />
             </div>
             <div className="w-24 flex-shrink-0 pt-2">
@@ -223,14 +208,9 @@ export function GatewayTemplateListenerForm({ value, onChange, disabled = false 
         )}
       </section>
 
-      {conflict && (
+      {issue && (
         <p className="text-sm text-red-600" role="alert">
-          {conflict}
-        </p>
-      )}
-      {value.length === 0 && !conflict && (
-        <p className="text-sm text-red-600" role="alert">
-          Add at least one listener.
+          {issue}
         </p>
       )}
     </div>

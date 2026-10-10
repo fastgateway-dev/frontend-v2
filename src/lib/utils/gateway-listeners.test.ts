@@ -5,6 +5,7 @@ import {
   domainNeedsTLSSecret,
   groupListeners,
   hostnameListeners,
+  listenerIssue,
   listenerPortConflict,
   streamListener,
 } from './gateway-listeners';
@@ -104,5 +105,40 @@ describe('domainNeedsTLSSecret', () => {
   });
   test('unbound HTTPS listener is ignored', () => {
     expect(domainNeedsTLSSecret(['http'], [http, https])).toBe(false);
+  });
+});
+
+describe('listenerIssue', () => {
+  test('null for a clean set', () => {
+    expect(listenerIssue([http, https, tcp])).toBeNull();
+  });
+  test('empty list', () => {
+    expect(listenerIssue([])).toBe('Add at least one listener');
+  });
+  test('missing port names the listener', () => {
+    expect(listenerIssue([{ name: 'web', protocol: 'HTTP' }])).toMatch(/"web".*port/);
+  });
+  test('zero, fractional and out-of-range ports are rejected', () => {
+    for (const port of [0, 70000, 80.5, -1]) {
+      expect(listenerIssue([{ name: 'web', protocol: 'HTTP', port }])).toMatch(/"web".*port/);
+    }
+  });
+  test('TLS listener without a port is rejected', () => {
+    expect(listenerIssue([{ name: 'pass', protocol: 'TLS' }])).toMatch(/"pass".*port/);
+  });
+  test('delegates to listenerPortConflict', () => {
+    expect(listenerIssue([http, { name: 'other', protocol: 'HTTP', port: 80 }])).toBe(
+      listenerPortConflict([http, { name: 'other', protocol: 'HTTP', port: 80 }])
+    );
+    expect(listenerIssue([{ name: 'r', protocol: 'HTTP', port: 19000 }])).toMatch(/reserved/);
+  });
+  test('empty name', () => {
+    expect(listenerIssue([{ name: '  ', protocol: 'HTTP', port: 80 }])).toBe('Every listener needs a name');
+  });
+  test('duplicate name', () => {
+    expect(listenerIssue([http, { name: 'http', protocol: 'HTTPS', port: 443 }])).toMatch(/"http".*more than once/);
+  });
+  test('canSubmitTemplate is false for a missing port', () => {
+    expect(canSubmitTemplate([{ name: 'web', protocol: 'HTTP' }])).toBe(false);
   });
 });

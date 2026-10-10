@@ -64,13 +64,37 @@ export function listenerPortConflict(listeners: TemplateListener[]): string | nu
   return null;
 }
 
-/** At least one listener, no conflicts, and every name non-empty and unique. */
+/**
+ * First human-readable problem with the listener set, or null when it is
+ * submittable. Order: empty, hostname-listener ports, port/range conflicts
+ * (listenerPortConflict), names.
+ */
+export function listenerIssue(listeners: TemplateListener[]): string | null {
+  if (listeners.length === 0) return 'Add at least one listener';
+
+  for (const l of hostnameListeners(listeners)) {
+    if (!validPort(l.port)) {
+      const label = l.name.trim() === '' ? `(${l.protocol})` : `"${l.name}"`;
+      return `Listener ${label} needs a port between 1 and 65535`;
+    }
+  }
+
+  const conflict = listenerPortConflict(listeners);
+  if (conflict !== null) return conflict;
+
+  const seen = new Set<string>();
+  for (const l of listeners) {
+    const name = l.name.trim();
+    if (name === '') return 'Every listener needs a name';
+    if (seen.has(name)) return `Listener name "${name}" is used more than once`;
+    seen.add(name);
+  }
+  return null;
+}
+
+/** At least one listener and no validation issue (see listenerIssue). */
 export function canSubmitTemplate(listeners: TemplateListener[]): boolean {
-  if (listeners.length === 0) return false;
-  if (listenerPortConflict(listeners) !== null) return false;
-  const names = listeners.map((l) => l.name.trim());
-  if (names.some((n) => n === '')) return false;
-  return new Set(names).size === names.length;
+  return listeners.length > 0 && listenerIssue(listeners) === null;
 }
 
 /** True if any bound listener is HTTPS that terminates TLS (mirrors backend domainNeedsTLSSecret). */

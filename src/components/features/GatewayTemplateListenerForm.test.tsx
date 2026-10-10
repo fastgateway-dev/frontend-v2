@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { GatewayTemplateListenerForm, fixedPortsValid } from './GatewayTemplateListenerForm';
+import { GatewayTemplateListenerForm } from './GatewayTemplateListenerForm';
 import type { TemplateListener } from '@/types';
 
 const defaults: TemplateListener[] = [
@@ -92,9 +92,28 @@ test('disabled locks every control', () => {
   expect(screen.getByRole('button', { name: /add tcp\/udp port range/i })).toBeDisabled();
 });
 
-test('fixedPortsValid rejects missing or out-of-range ports', () => {
-  expect(fixedPortsValid(defaults)).toBe(true);
-  expect(fixedPortsValid([{ name: 'a', protocol: 'HTTP' }])).toBe(false);
-  expect(fixedPortsValid([{ name: 'a', protocol: 'HTTP', port: 70000 }])).toBe(false);
-  expect(fixedPortsValid([{ name: 's', protocol: 'TCP', portRangeMin: 1, portRangeMax: 2 }])).toBe(true);
+test('shows a reason for a cleared name, a missing port and a duplicate name', () => {
+  const { rerender } = render(
+    <GatewayTemplateListenerForm value={[{ name: '', protocol: 'HTTP', port: 80 }]} onChange={() => {}} />
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent('Every listener needs a name');
+
+  rerender(<GatewayTemplateListenerForm value={[{ name: 'web', protocol: 'HTTP' }]} onChange={() => {}} />);
+  expect(screen.getByRole('alert')).toHaveTextContent(/"web".*port/);
+
+  rerender(
+    <GatewayTemplateListenerForm
+      value={[
+        { name: 'a', protocol: 'HTTP', port: 80 },
+        { name: 'a', protocol: 'HTTP', port: 81 },
+      ]}
+      onChange={() => {}}
+    />
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent('"a" is used more than once');
+});
+
+test('empty list shows the add-one message', () => {
+  render(<GatewayTemplateListenerForm value={[]} onChange={() => {}} />);
+  expect(screen.getByRole('alert')).toHaveTextContent('Add at least one listener');
 });
