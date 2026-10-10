@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { Plus, Server, Globe, Network } from 'lucide-react';
 import { Button, Card, CardContent, Badge } from '@/components/ui';
 import { domainTemplatesApi, projectsApi } from '@/lib/api';
-import type { DomainTemplate, Project, ExposureType, TLSMode } from '@/types';
+import { hostnameListeners, streamListener, listenerLabel } from '@/lib/utils/gateway-listeners';
+import type { DomainTemplate, Project, ExposureType } from '@/types';
 
 export default function DomainTemplatesPage() {
   const params = useParams();
@@ -69,19 +70,6 @@ export default function DomainTemplatesPage() {
     }
   };
 
-  const getTlsModeBadge = (tlsMode: TLSMode) => {
-    switch (tlsMode) {
-      case 'tls_only':
-        return <Badge variant="success">TLS Only</Badge>;
-      case 'no_tls':
-        return <Badge variant="warning">No TLS</Badge>;
-      case 'both':
-        return <Badge variant="info">HTTP + HTTPS</Badge>;
-      default:
-        return <Badge>{tlsMode}</Badge>;
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="p-8">
@@ -137,21 +125,22 @@ export default function DomainTemplatesPage() {
                         <h3 className="font-semibold text-gray-900">{template.name}</h3>
                         {getStatusBadge(template.status)}
                         {getExposureBadge(template.exposureType)}
-                        {getTlsModeBadge(template.tlsMode)}
+                        {hostnameListeners(template.listeners ?? []).length > 0 && (
+                          <Badge variant="success">Domain</Badge>
+                        )}
+                        {streamListener(template.listeners ?? []) && (
+                          <Badge variant="info">Stream</Badge>
+                        )}
                         {template.mergeGateways && (
                           <Badge variant="info" className="flex items-center gap-1">Merged</Badge>
                         )}
                       </div>
                       <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
-                        {template.tlsMode !== 'tls_only' && (
-                          <span>HTTP: {template.httpPort}</span>
-                        )}
-                        {template.tlsMode !== 'no_tls' && (
-                          <span>HTTPS: {template.httpsPort}</span>
-                        )}
-                        {template.tlsMode !== 'no_tls' && (
-                          <span>TLS Policy: {template.tlsPolicy}</span>
-                        )}
+                        {(template.listeners ?? []).map((l) => (
+                          <span key={l.name} className="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-700">
+                            {listenerLabel(l)}
+                          </span>
+                        ))}
                         {Object.keys(template.annotations || {}).length > 0 && (
                           <span>{Object.keys(template.annotations).length} annotation(s)</span>
                         )}

@@ -5,6 +5,8 @@ import {
   findPortCollision,
   parseListenerPort,
   policyCapabilities,
+  portInRange,
+  rangeError,
 } from './l4route';
 import type { StreamRoute } from '@/types';
 
@@ -97,5 +99,22 @@ test('buildCreateInput puts listenerPort in config with no L7 fields', () => {
       backends: [{ type: 'kubernetes', service: 'pg', namespace: 'ns', port: 5432, weight: 100 }],
       listenerPort: 5432,
     },
+  });
+});
+
+describe('portInRange / rangeError', () => {
+  test('portInRange', () => {
+    expect(portInRange(9042, 9000, 9100)).toBe(true);
+    expect(portInRange(9000, 9000, 9100)).toBe(true);
+    expect(portInRange(9100, 9000, 9100)).toBe(true);
+    expect(portInRange(8125, 9000, 9100)).toBe(false);
+  });
+  test('rangeError is null when in range', () => {
+    expect(rangeError(9042, 9000, 9100)).toBeNull();
+  });
+  test('rangeError mentions both bounds when out of range', () => {
+    const msg = rangeError(8125, 9000, 9100);
+    expect(msg).toMatch(/9000/);
+    expect(msg).toMatch(/9100/);
   });
 });

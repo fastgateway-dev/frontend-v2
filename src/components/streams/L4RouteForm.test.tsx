@@ -5,13 +5,19 @@ const push = jest.fn();
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 jest.mock('@/lib/api', () => ({
   streamsApi: {
-    get: jest.fn().mockResolvedValue({ id: 's1', name: 'pg-stream' }),
+    get: jest.fn().mockResolvedValue({ id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1' }),
     listRoutes: jest.fn().mockResolvedValue({
       data: [{ id: 'r1', name: 'db', protocol: 'tcp', status: 'active', config: { listenerPort: 5432 } }],
     }),
     createRoute: jest.fn(),
     updateRoute: jest.fn(),
     getRoute: jest.fn(),
+  },
+  domainTemplatesApi: {
+    get: jest.fn().mockResolvedValue({
+      id: 'gt1',
+      listeners: [{ name: 'l4', protocol: 'TCP', portRangeMin: 5000, portRangeMax: 7000 }],
+    }),
   },
   projectTeamsApi: { listMyTeams: jest.fn().mockResolvedValue([{ team: { id: 't1', name: 'Team' } }]) },
   projectNamespacesApi: {
@@ -21,7 +27,7 @@ jest.mock('@/lib/api', () => ({
     listServices: jest.fn().mockResolvedValue([{ name: 'pg', namespace: 'ns', ports: [{ name: 'p', port: 5432, protocol: 'TCP' }] }]),
   },
 }));
-import { streamsApi } from '@/lib/api';
+import { streamsApi, domainTemplatesApi } from '@/lib/api';
 
 const renderForm = async () => {
   render(<L4RouteForm projectId="p1" streamId="s1" />);
@@ -99,4 +105,25 @@ test('renders backend-returned warnings after a successful submit', async () => 
   fillValid('6379');
   fireEvent.click(screen.getByRole('button', { name: 'Create Route' }));
   expect(await screen.findByTestId('submit-warnings')).toHaveTextContent('mixed protocol LB notice');
+});
+
+test('shows the allowed range and blocks submit for a port outside it', async () => {
+  await renderForm();
+  expect(screen.getByText(/Allowed range: 5000–7000/)).toBeInTheDocument();
+
+  fillValid('9000');
+  fireEvent.click(screen.getByRole('button', { name: 'Create Route' }));
+  expect(await screen.findByText('Listener port must be between 5000 and 7000')).toBeInTheDocument();
+  expect(streamsApi.createRoute).not.toHaveBeenCalled();
+});
+
+test('falls back to the plain port check when the template fetch fails', async () => {
+  (domainTemplatesApi.get as jest.Mock).mockRejectedValueOnce(new Error('boom'));
+  (streamsApi.createRoute as jest.Mock).mockResolvedValue({ warnings: [] });
+  await renderForm();
+  expect(screen.queryByText(/Allowed range/)).not.toBeInTheDocument();
+
+  fillValid('9000');
+  fireEvent.click(screen.getByRole('button', { name: 'Create Route' }));
+  await waitFor(() => expect(streamsApi.createRoute).toHaveBeenCalled());
 });

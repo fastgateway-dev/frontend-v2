@@ -5,12 +5,13 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, AlertTriangle, Info, X, Shield, Trash2, Upload, Sparkles, MessageSquare, Globe } from 'lucide-react';
 import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent, Accordion, AccordionItem, AccordionTrigger, AccordionContent, Input, InfoTooltip, Select } from '@/components/ui';
-import { domainsApi } from '@/lib/api';
+import { domainsApi, domainTemplatesApi } from '@/lib/api';
 import { aiApi } from '@/lib/api/ai';
 import { dnsRecordsApi } from '@/lib/api/dns-records';
 import { dnsZonesApi } from '@/lib/api/dns-zones';
 import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
 import { dnsRecordStatusBadge, matchingZonesFor } from '@/lib/utils/dns';
+import { domainNeedsTLSSecret } from '@/lib/utils/gateway-listeners';
 import { DNSRecordFields } from '@/components/features/dns-record-fields';
 import { TlsSecretCombobox } from '@/components/features/tls-secret-combobox';
 import { AIReviewCard } from '@/components/features/ai-review-card';
@@ -21,7 +22,7 @@ import ResponseOverrideForm from '@/components/ResponseOverrideForm';
 import LuaExtensionForm from '@/components/LuaExtensionForm';
 import WasmExtensionForm from '@/components/WasmExtensionForm';
 import ExtProcExtensionForm from '@/components/ExtProcExtensionForm';
-import type { Domain, DomainSettings, TLSProfile, TLSSecretInfo, MTLSCACert, MTLSSANEntry, AIReviewResult, AIChatContext, CompressionType, LoadBalancerType, ConsistentHashType, RetryConfig, RetryOn, PerRetryPolicy, BackOffPolicy, CircuitBreakerConfig, RequestBufferConfig, ResponseOverrideRule, BTPTimeoutConfig, BackendTrafficPolicyConfig, EnvoyExtensionPolicyConfig, LuaExtensionConfig, WasmExtensionConfig, ExtProcExtensionConfig, DomainDNSRecord, DNSRecordType, DNSRecordInput, DNSHostedZone, DNSProviderCredential } from '@/types';
+import type { Domain, DomainTemplate, DomainSettings, TLSProfile, TLSSecretInfo, MTLSCACert, MTLSSANEntry, AIReviewResult, AIChatContext, CompressionType, LoadBalancerType, ConsistentHashType, RetryConfig, RetryOn, PerRetryPolicy, BackOffPolicy, CircuitBreakerConfig, RequestBufferConfig, ResponseOverrideRule, BTPTimeoutConfig, BackendTrafficPolicyConfig, EnvoyExtensionPolicyConfig, LuaExtensionConfig, WasmExtensionConfig, ExtProcExtensionConfig, DomainDNSRecord, DNSRecordType, DNSRecordInput, DNSHostedZone, DNSProviderCredential } from '@/types';
 
 // TLS Profile presets
 const TLS_PROFILES: Record<TLSProfile, { label: string; description: string; minVersion: string; maxVersion: string; ciphers: string[] }> = {
@@ -67,6 +68,7 @@ export default function DomainSettingsPage() {
   const domainId = params.domainId as string;
 
   const [domain, setDomain] = useState<Domain | null>(null);
+  const [domainTemplate, setDomainTemplate] = useState<DomainTemplate | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -224,8 +226,14 @@ export default function DomainSettingsPage() {
     loadData();
   }, [projectId, domainId]);
 
-  // The domain serves TLS (so a certificate applies) unless its template is no_tls.
-  const needsTLS = !!domain && domain.tlsMode !== 'no_tls';
+  // A certificate applies when a bound listener terminates TLS. Uses the
+  // domain's template listeners; if the template could not be loaded, fall
+  // back to whether the domain already has a TLS secret configured.
+  const needsTLS = !!domain && (
+    domainTemplate
+      ? domainNeedsTLSSecret(domain.boundListeners ?? [], domainTemplate.listeners ?? [])
+      : !!domain.tlsSecretName
+  );
 
   const fetchTLSSecrets = useCallback(async (namespace?: string) => {
     if (!projectId) return;
@@ -395,6 +403,11 @@ export default function DomainSettingsPage() {
       ]);
 
       setDomain(domainData);
+      if (domainData.domainTemplateId) {
+        setDomainTemplate(
+          await domainTemplatesApi.get(projectId, domainData.domainTemplateId).catch(() => null)
+        );
+      }
       setCertSecretName(domainData.tlsSecretName || '');
       setCertSecretNamespace(domainData.tlsSecretNamespace || 'fastgateway-system');
       setAiEnabled(aiStatus.enabled);

@@ -13,6 +13,7 @@ import { aiApi } from '@/lib/api/ai';
 import { dnsZonesApi } from '@/lib/api/dns-zones';
 import { dnsCredentialsApi } from '@/lib/api/dns-credentials';
 import { matchingZonesFor } from '@/lib/utils/dns';
+import { hostnameListeners, domainNeedsTLSSecret, listenerLabel } from '@/lib/utils/gateway-listeners';
 import { LabelsEditor } from '@/components/ui/labels-editor';
 import type { Project, DomainTemplate, AIReviewResult, TLSSecretInfo, DNSRecordType, DNSHostedZone, DNSProviderCredential } from '@/types';
 
@@ -29,6 +30,7 @@ export default function CreateDomainPage() {
   const [name, setName] = useState('');
   const [hostname, setHostname] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [boundListeners, setBoundListeners] = useState<string[]>([]);
   const [tlsSecretName, setTlsSecretName] = useState('');
   const [tlsSecretNamespace, setTlsSecretNamespace] = useState('fastgateway-system');
   const [tlsSecrets, setTlsSecrets] = useState<TLSSecretInfo[]>([]);
@@ -70,7 +72,10 @@ export default function CreateDomainPage() {
   const [changeDescription, setChangeDescription] = useState('');
 
   const selectedTemplate = domainTemplates.find((t) => t.id === selectedTemplateId);
-  const needsTLS = selectedTemplate && selectedTemplate.tlsMode !== 'no_tls';
+  const selectableListeners = selectedTemplate ? hostnameListeners(selectedTemplate.listeners ?? []) : [];
+  const needsTLS = selectedTemplate
+    ? domainNeedsTLSSecret(boundListeners, selectedTemplate.listeners ?? [])
+    : false;
 
   const fetchTLSSecrets = useCallback(async (namespace?: string) => {
     if (!projectId) return;
@@ -115,7 +120,7 @@ export default function CreateDomainPage() {
     try {
       const [projectData, templatesData, nsData, hostedZonesResult, dnsCredentialsResult] = await Promise.all([
         projectsApi.get(projectId),
-        domainTemplatesApi.list(projectId),
+        domainTemplatesApi.list(projectId, 1, 100, 'domain'),
         domainsApi.listAvailableNamespaces(projectId).catch(() => ({ namespaces: ['fastgateway-system'] })),
         dnsZonesApi.list().catch(() => []),
         dnsCredentialsApi.list().catch(() => []),
@@ -139,6 +144,7 @@ export default function CreateDomainPage() {
     if (!name.trim()) errors.name = 'Name is required';
     if (!hostname.trim()) errors.hostname = 'Hostname is required';
     if (!selectedTemplateId) errors.template = 'Domain Template is required';
+    if (selectedTemplateId && boundListeners.length === 0) errors.boundListeners = 'Select at least one listener';
     if (needsTLS && !tlsSecretName.trim()) errors.tlsSecretName = 'TLS Secret Name is required when TLS is enabled';
     return errors;
   };
@@ -153,7 +159,7 @@ export default function CreateDomainPage() {
     const errors = collectValidationErrors();
     return Object.values(errors);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, hostname, selectedTemplateId, needsTLS, tlsSecretName]);
+  }, [name, hostname, selectedTemplateId, boundListeners, needsTLS, tlsSecretName]);
 
   // Hosted-zone picker: zones registered that cover the typed hostname, and
   // the provider behind whichever zone is currently selected. Reactive to
@@ -208,6 +214,7 @@ export default function CreateDomainPage() {
     name: name.trim(),
     hostname: hostname.trim(),
     domainTemplateId: selectedTemplateId,
+    boundListeners,
     tlsSecretName: needsTLS ? tlsSecretName.trim() : '',
     tlsSecretNamespace: needsTLS && tlsSecretNamespace !== 'fastgateway-system' ? tlsSecretNamespace : undefined,
     ...(domainNamespace !== 'fastgateway-system' ? { namespace: domainNamespace } : {}),
@@ -349,8 +356,18 @@ export default function CreateDomainPage() {
                       label="Domain Template"
                       value={selectedTemplateId}
                       onChange={(e) => {
-                        setSelectedTemplateId(e.target.value);
-                        setFormErrors(prev => ({ ...prev, template: '' }));
+                        const id = e.target.value;
+                        setSelectedTemplateId(id);
+                        // Default: bind every non-passthrough hostname listener.
+                        const tpl = domainTemplates.find((t) => t.id === id);
+                        setBoundListeners(
+                          tpl
+                            ? hostnameListeners(tpl.listeners ?? [])
+                                .filter((l) => l.protocol !== 'TLS')
+                                .map((l) => l.name)
+                            : []
+                        );
+                        setFormErrors(prev => ({ ...prev, template: '', boundListeners: '' }));
                       }}
                       options={[
                         { value: '', label: 'Select a domain template...' },
@@ -358,7 +375,7 @@ export default function CreateDomainPage() {
                           .filter((t) => t.status === 'active')
                           .map((t) => ({
                             value: t.id,
-                            label: `${t.name} (${t.exposureType}, ${t.tlsMode.replace('_', ' ')})`,
+                            label: `${t.name} (${t.exposureType})`,
                           })),
                       ]}
                       error={formErrors.template}
@@ -372,22 +389,6 @@ export default function CreateDomainPage() {
                             <span className="text-gray-500">Exposure:</span>{' '}
                             <span className="font-medium capitalize">{selectedTemplate.exposureType}</span>
                           </div>
-                          <div>
-                            <span className="text-gray-500">TLS:</span>{' '}
-                            <span className="font-medium capitalize">{selectedTemplate.tlsMode.replace('_', ' ')}</span>
-                          </div>
-                          {selectedTemplate.tlsMode !== 'tls_only' && (
-                            <div>
-                              <span className="text-gray-500">HTTP Port:</span>{' '}
-                              <span className="font-medium">{selectedTemplate.httpPort}</span>
-                            </div>
-                          )}
-                          {selectedTemplate.tlsMode !== 'no_tls' && (
-                            <div>
-                              <span className="text-gray-500">HTTPS Port:</span>{' '}
-                              <span className="font-medium">{selectedTemplate.httpsPort}</span>
-                            </div>
-                          )}
                           {Object.keys(selectedTemplate.annotations || {}).length > 0 && (
                             <div className="col-span-2">
                               <span className="text-gray-500">Annotations:</span>{' '}
@@ -404,6 +405,52 @@ export default function CreateDomainPage() {
                           </div>
                         )}
                       </div>
+                    )}
+
+                    {selectedTemplate && (
+                      <fieldset className="p-4 border border-gray-200 rounded-lg space-y-2">
+                        <legend className="px-1 text-sm font-medium text-gray-700">Bound Listeners</legend>
+                        {selectableListeners.length === 0 ? (
+                          <p className="text-sm text-amber-700">
+                            This template has no hostname listeners (HTTP, HTTPS or TLS) to bind.
+                          </p>
+                        ) : (
+                          selectableListeners.map((l) => {
+                            const isPassthrough = l.protocol === 'TLS';
+                            const id = `listener-${l.name}`;
+                            return (
+                              <div key={l.name} className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id={id}
+                                  checked={boundListeners.includes(l.name)}
+                                  disabled={isPassthrough}
+                                  onChange={(e) => {
+                                    setBoundListeners((prev) =>
+                                      e.target.checked
+                                        ? [...prev, l.name]
+                                        : prev.filter((n) => n !== l.name)
+                                    );
+                                    setFormErrors((prev) => ({ ...prev, boundListeners: '' }));
+                                  }}
+                                  className="h-4 w-4 rounded border-gray-300 text-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                />
+                                <label htmlFor={id} className="text-sm text-gray-700">
+                                  <span className="font-medium">{l.name}</span> — {listenerLabel(l)}
+                                  {isPassthrough && (
+                                    <span className="ml-2 text-xs text-gray-500">(TLS passthrough not yet supported for domains)</span>
+                                  )}
+                                </label>
+                              </div>
+                            );
+                          })
+                        )}
+                        {selectedTemplateId && boundListeners.length === 0 && (
+                          <p className="text-sm text-danger">
+                            {formErrors.boundListeners || 'Select at least one listener'}
+                          </p>
+                        )}
+                      </fieldset>
                     )}
 
                     <Input
@@ -620,11 +667,11 @@ export default function CreateDomainPage() {
                       <Button
                         onClick={() => setActiveTab('preview')}
                         variant="secondary"
-                        disabled={!selectedTemplateId || !name || !hostname}
+                        disabled={!selectedTemplateId || !name || !hostname || boundListeners.length === 0}
                       >
                         Preview
                       </Button>
-                      <Button onClick={handleCreate} isLoading={isCreating} disabled={!selectedTemplateId}>
+                      <Button onClick={handleCreate} isLoading={isCreating} disabled={!selectedTemplateId || boundListeners.length === 0}>
                         Create Domain
                       </Button>
                     </div>

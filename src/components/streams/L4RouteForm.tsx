@@ -9,8 +9,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { Button, Card, CardContent, Input, Select, Checkbox } from '@/components/ui';
-import { streamsApi, projectTeamsApi, projectNamespacesApi, kubernetesApi } from '@/lib/api';
-import type { ProjectTeamRole, Stream, StreamRoute, K8sService, LoadBalancerType } from '@/types';
+import { streamsApi, projectTeamsApi, projectNamespacesApi, kubernetesApi, domainTemplatesApi } from '@/lib/api';
+import type { DomainTemplate, ProjectTeamRole, Stream, StreamRoute, K8sService, LoadBalancerType } from '@/types';
 import {
   L4_LB_TYPES,
   buildCreateInput,
@@ -19,11 +19,13 @@ import {
   findPortCollision,
   parseListenerPort,
   policyCapabilities,
+  rangeError,
   routeToFormState,
   type L4BackendForm,
   type L4PolicyForm,
   type L4Protocol,
 } from '@/lib/utils/l4route';
+import { streamListener } from '@/lib/utils/gateway-listeners';
 
 interface Props {
   projectId: string;
@@ -40,6 +42,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const streamUrl = `/projects/${projectId}/streams/${streamId}`;
 
   const [stream, setStream] = useState<Stream | null>(null);
+  const [template, setTemplate] = useState<DomainTemplate | null>(null);
   const [teams, setTeams] = useState<ProjectTeamRole[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [existingRoutes, setExistingRoutes] = useState<StreamRoute[]>([]);
@@ -65,6 +68,16 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
 
   const caps = policyCapabilities(protocol);
   const port = parseListenerPort(portInput);
+
+  // Allowed listener-port range from the stream template's TCP/UDP listener.
+  // Unknown (template fetch failed / no stream listener) => no client-side
+  // range check; the server's 400 stays authoritative either way.
+  const range = useMemo(() => {
+    const sl = streamListener(template?.listeners ?? []);
+    return sl && sl.portRangeMin != null && sl.portRangeMax != null
+      ? { min: sl.portRangeMin, max: sl.portRangeMax }
+      : null;
+  }, [template]);
 
   // Live (client-side) collision check against the ports already on this stream.
   const collision = useMemo(
@@ -94,6 +107,13 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
           routeId ? streamsApi.getRoute(projectId, streamId, routeId) : Promise.resolve(null),
         ]);
         setStream(streamData);
+        // Best-effort: the template gives the allowed port range. On failure
+        // fall back to the plain 1-65535 check and let the server decide.
+        try {
+          setTemplate(await domainTemplatesApi.get(projectId, streamData.gatewayTemplateId));
+        } catch {
+          setTemplate(null);
+        }
         setExistingRoutes(routesData.data || []);
         const nsNames = (nsData || []).filter((n) => n.referenceGrantCreated).map((n) => n.namespace);
         setNamespaces(nsNames);
@@ -150,6 +170,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
       if (!teamId) errs.team = 'Owner team is required';
     }
     if (port == null) errs.port = 'Listener port must be an integer between 1 and 65535';
+    else if (range && rangeError(port, range.min, range.max)) errs.port = rangeError(port, range.min, range.max) as string;
     else if (collision) errs.port = `Port ${port}/${protocol.toUpperCase()} is already used by route "${collision.routeName}"`;
     if (backends.length === 0) errs.backends = 'At least one backend is required';
     backends.forEach((b, i) => {
@@ -304,6 +325,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
               )}
               <p className="mt-1 text-xs text-gray-500">
                 The Gateway listener port this route is exposed on. A port can be used once per protocol.
+                {range && <> Allowed range: {range.min}–{range.max}.</>}
               </p>
             </div>
           </CardContent>

@@ -16,8 +16,10 @@ import { TolerationsEditor } from '@/components/scheduling/TolerationsEditor';
 import { TopologySpreadEditor } from '@/components/scheduling/TopologySpreadEditor';
 import { PdbEditor } from '@/components/scheduling/PdbEditor';
 import { DeploymentStrategyEditor } from '@/components/scheduling/DeploymentStrategyEditor';
+import { GatewayTemplateListenerForm } from '@/components/features/GatewayTemplateListenerForm';
+import { canSubmitTemplate } from '@/lib/utils/gateway-listeners';
 import { domainTemplatesApi } from '@/lib/api';
-import type { DomainTemplate, ScalingType, AIReviewResult, CreateDomainTemplateInput, ExternalTrafficPolicy, DomainTemplatePreviewResult, TelemetryAccessLogConfig, TelemetryTracingConfig, TelemetryMetricsConfig, PodPlacementConfig, PDBConfig, DeploymentStrategyConfig } from '@/types';
+import type { TemplateListener, DomainTemplate, ScalingType, AIReviewResult, CreateDomainTemplateInput, ExternalTrafficPolicy, DomainTemplatePreviewResult, TelemetryAccessLogConfig, TelemetryTracingConfig, TelemetryMetricsConfig, PodPlacementConfig, PDBConfig, DeploymentStrategyConfig } from '@/types';
 
 interface EditFormValues {
   description: string;
@@ -33,8 +35,6 @@ interface EditFormValues {
   replicas: number;
   minReplicas: number;
   maxReplicas: number;
-  enableDomain: boolean;
-  enableStream: boolean;
 }
 
 interface TelemetryState {
@@ -61,11 +61,10 @@ type UpdateBody = Partial<CreateDomainTemplateInput> & {
   clearDeploymentStrategy?: boolean;
 };
 
-function buildUpdateInput(values: EditFormValues, telemetry?: TelemetryState, scheduling?: SchedulingState): UpdateBody {
+function buildUpdateInput(values: EditFormValues, listeners: TemplateListener[], telemetry?: TelemetryState, scheduling?: SchedulingState): UpdateBody {
   const input: UpdateBody = {
     description: values.description || undefined,
-    enableDomain: values.enableDomain,
-    enableStream: values.enableStream,
+    listeners,
   };
 
   if (values.externalTrafficPolicy) {
@@ -190,6 +189,10 @@ export default function DomainTemplateEditPage() {
   // Submit state
   const [isApplying, setIsApplying] = useState(false);
 
+  // Listener state (managed separately from react-hook-form)
+  const [listeners, setListeners] = useState<TemplateListener[]>([]);
+  const listenersValid = canSubmitTemplate(listeners);
+
   // Telemetry state (managed separately from react-hook-form)
   const [telemetryAccessLog, setTelemetryAccessLog] = useState<TelemetryAccessLogConfig | null>(null);
   const [telemetryTracing, setTelemetryTracing] = useState<TelemetryTracingConfig | null>(null);
@@ -215,8 +218,6 @@ export default function DomainTemplateEditPage() {
       replicas: 1,
       minReplicas: 1,
       maxReplicas: 3,
-      enableDomain: true,
-      enableStream: false,
     },
   });
 
@@ -231,9 +232,6 @@ export default function DomainTemplateEditPage() {
   });
 
   const scalingType = watch('scalingType');
-  const watchEnableDomain = watch('enableDomain');
-  const watchEnableStream = watch('enableStream');
-  const noCapabilitySelected = !watchEnableDomain && !watchEnableStream;
 
   // Load template data
   useEffect(() => {
@@ -260,9 +258,10 @@ export default function DomainTemplateEditPage() {
           replicas: data.scalingConfig?.replicas || 1,
           minReplicas: data.scalingConfig?.minReplicas || 1,
           maxReplicas: data.scalingConfig?.maxReplicas || 3,
-          enableDomain: data.enableDomain ?? true,
-          enableStream: data.enableStream ?? false,
         });
+
+        // Initialize listeners from loaded template
+        setListeners(data.listeners ?? []);
 
         // Initialize telemetry state from loaded template
         setTelemetryAccessLog(data.telemetryAccessLog ?? null);
@@ -306,11 +305,17 @@ export default function DomainTemplateEditPage() {
     setAiReviewResult(null);
     setAiReviewError(null);
 
+    if (!listenersValid) {
+      setPreviewError('Fix the listener errors on the Settings tab before previewing.');
+      setIsLoadingPreview(false);
+      return;
+    }
+
     try {
       const values = watch();
       const telemetry = { accessLog: telemetryAccessLog, tracing: telemetryTracing, metrics: telemetryMetrics };
       const scheduling = { podPlacement, pdbConfig, deploymentStrategy };
-      const updateData = buildUpdateInput(values, telemetry, scheduling);
+      const updateData = buildUpdateInput(values, listeners, telemetry, scheduling);
       const result = await domainTemplatesApi.previewChanges(projectId, domainTemplateId, updateData);
       setPreviewResult(result);
     } catch (err: unknown) {
@@ -330,7 +335,7 @@ export default function DomainTemplateEditPage() {
       const values = watch();
       const telemetry = { accessLog: telemetryAccessLog, tracing: telemetryTracing, metrics: telemetryMetrics };
       const scheduling = { podPlacement, pdbConfig, deploymentStrategy };
-      const updateData = buildUpdateInput(values, telemetry, scheduling);
+      const updateData = buildUpdateInput(values, listeners, telemetry, scheduling);
       const result = await domainTemplatesApi.previewChanges(projectId, domainTemplateId, updateData, {
         includeAIReview: true,
         changeDescription: changeDescription || undefined,
@@ -355,7 +360,7 @@ export default function DomainTemplateEditPage() {
       const values = watch();
       const telemetry = { accessLog: telemetryAccessLog, tracing: telemetryTracing, metrics: telemetryMetrics };
       const scheduling = { podPlacement, pdbConfig, deploymentStrategy };
-      const updateData = buildUpdateInput(values, telemetry, scheduling);
+      const updateData = buildUpdateInput(values, listeners, telemetry, scheduling);
       await domainTemplatesApi.update(projectId, domainTemplateId, updateData);
       router.push(`/projects/${projectId}/domain-templates/${domainTemplateId}`);
     } catch (err: unknown) {
@@ -434,30 +439,6 @@ export default function DomainTemplateEditPage() {
               <span className="text-gray-500">Exposure Type:</span>{' '}
               <Badge variant="default">{template.exposureType}</Badge>
             </div>
-            {template.enableDomain && (
-              <div>
-                <span className="text-gray-500">TLS Mode:</span>{' '}
-                <Badge variant="info">{template.tlsMode.replace('_', ' ')}</Badge>
-              </div>
-            )}
-            {template.enableDomain && template.tlsMode !== 'no_tls' && (
-              <div>
-                <span className="text-gray-500">TLS Policy:</span>{' '}
-                <span className="font-medium capitalize">{template.tlsPolicy}</span>
-              </div>
-            )}
-            {template.enableDomain && template.tlsMode !== 'tls_only' && (
-              <div>
-                <span className="text-gray-500">HTTP Port:</span>{' '}
-                <span className="font-medium">{template.httpPort}</span>
-              </div>
-            )}
-            {template.enableDomain && template.tlsMode !== 'no_tls' && (
-              <div>
-                <span className="text-gray-500">HTTPS Port:</span>{' '}
-                <span className="font-medium">{template.httpsPort}</span>
-              </div>
-            )}
             <div>
               <span className="text-gray-500">Merge Gateways:</span>{' '}
               <span className="font-medium">{template.mergeGateways ? 'Enabled' : 'Disabled'}</span>
@@ -478,32 +459,13 @@ export default function DomainTemplateEditPage() {
             {/* SETTINGS TAB */}
             <TabsContent value="settings">
               <div className="space-y-6 mt-4">
-                {/* Capabilities */}
+                {/* Listeners */}
                 <div>
-                  <h3 className="font-semibold text-gray-900 mb-4">Capabilities</h3>
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        {...register('enableDomain')}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                      />
-                      <span className="text-sm font-medium text-gray-700">Enable for Domains</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        {...register('enableStream')}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                      />
-                      <span className="text-sm font-medium text-gray-700">Enable for Streams</span>
-                    </label>
-                    {noCapabilitySelected && (
-                      <p className="text-sm text-red-600" role="alert">
-                        Select at least one capability: Domains or Streams.
-                      </p>
-                    )}
-                  </div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Listeners</h3>
+                  <p className="text-sm text-gray-500 mb-4">
+                    Domains can bind the HTTP/HTTPS listeners; streams use the TCP/UDP range.
+                  </p>
+                  <GatewayTemplateListenerForm value={listeners} onChange={setListeners} />
                 </div>
 
                 {/* Description */}
@@ -863,7 +825,7 @@ export default function DomainTemplateEditPage() {
           variant="primary"
           onClick={handleApplyChanges}
           isLoading={isApplying}
-          disabled={noCapabilitySelected}
+          disabled={!listenersValid}
         >
           Apply Changes
         </Button>
