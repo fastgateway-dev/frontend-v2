@@ -7,6 +7,8 @@ import { ArrowLeft, AlertTriangle } from 'lucide-react';
 import { Button, Card, CardContent, Select, Input } from '@/components/ui';
 import { streamsApi, domainTemplatesApi, domainsApi, projectsApi } from '@/lib/api';
 import type { Project, DomainTemplate } from '@/types';
+import { TemplateEntrypointSummary } from '@/components/streams/TemplateEntrypointSummary';
+import { templateOptionLabel } from '@/lib/utils/stream-entrypoint';
 
 const DEFAULT_NAMESPACE = 'fastgateway-system';
 
@@ -138,11 +140,15 @@ export default function CreateStreamPage() {
                     { value: '', label: 'Select a gateway template...' },
                     ...usableTemplates.map((t) => ({
                       value: t.id,
-                      label: `${t.name} (${t.exposureType})`,
+                      label: templateOptionLabel(t),
                     })),
                   ]}
                   error={formErrors.template}
                 />
+
+                {selectedTemplateId && (
+                  <TemplateEntrypointSummary projectId={projectId} templateId={selectedTemplateId} />
+                )}
 
                 <Input
                   id="name"
