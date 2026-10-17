@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { DomainTemplate, CreateDomainTemplateInput, PaginatedResponse, DomainTemplateManifests, DomainTemplatePreviewResult, DomainTemplateCreatePreviewResult, Domain } from '@/types';
+import type { DomainTemplate, CreateDomainTemplateInput, PaginatedResponse, DomainTemplateManifests, DomainTemplatePreviewResult, DomainTemplateCreatePreviewResult, Domain, StreamEntrypoint } from '@/types';
 
 export const domainTemplatesApi = {
   list: async (projectId: string, page = 1, limit = 20, capability?: 'domain' | 'stream'): Promise<PaginatedResponse<DomainTemplate>> => {
@@ -84,6 +84,13 @@ export const domainTemplatesApi = {
   listDomains: async (projectId: string, domainTemplateId: string): Promise<{ data: Domain[] }> => {
     const response = await apiClient.get<{ data: Domain[] }>(
       `/projects/${projectId}/domain-templates/${domainTemplateId}/domains`
+    );
+    return response.data;
+  },
+  // Entry point a new stream on this template would get (ports is [] when dedicated).
+  getEntrypoint: async (projectId: string, domainTemplateId: string): Promise<StreamEntrypoint> => {
+    const response = await apiClient.get<StreamEntrypoint>(
+      `/projects/${projectId}/domain-templates/${domainTemplateId}/entrypoint`
     );
     return response.data;
   },

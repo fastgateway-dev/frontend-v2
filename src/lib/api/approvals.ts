@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { ApprovalRequest, PaginatedResponse, AIReviewResult } from '@/types';
+import type { ApprovalRequest, PaginatedResponse, ApprovalDiff } from '@/types';
 
 export const approvalsApi = {
   list: async (
@@ -44,41 +44,8 @@ export const approvalsApi = {
     return response.data;
   },
 
-  getDiff: async (
-    projectId: string,
-    approvalId: string
-  ): Promise<{
-    action: string;
-    currentYaml?: string;
-    proposedYaml?: string;
-    currentSecurityPolicyYaml?: string;
-    proposedSecurityPolicyYaml?: string;
-    currentBackendTrafficPolicyYaml?: string;
-    proposedBackendTrafficPolicyYaml?: string;
-    currentEnvoyExtensionPolicyYaml?: string;
-    proposedEnvoyExtensionPolicyYaml?: string;
-    currentBackendYaml?: string;
-    proposedBackendYaml?: string;
-    changeDescription?: string;
-    aiReview?: AIReviewResult;
-  }> => {
-    const response = await apiClient.get<{
-      action: string;
-      currentYaml?: string;
-      proposedYaml?: string;
-      currentSecurityPolicyYaml?: string;
-      proposedSecurityPolicyYaml?: string;
-      currentBackendTrafficPolicyYaml?: string;
-      proposedBackendTrafficPolicyYaml?: string;
-      currentEnvoyExtensionPolicyYaml?: string;
-      proposedEnvoyExtensionPolicyYaml?: string;
-      currentBackendYaml?: string;
-      proposedBackendYaml?: string;
-      changeDescription?: string;
-      aiReview?: AIReviewResult;
-    }>(
-      `/projects/${projectId}/approvals/${approvalId}/diff`
-    );
+  getDiff: async (projectId: string, approvalId: string): Promise<ApprovalDiff> => {
+    const response = await apiClient.get<ApprovalDiff>(`/projects/${projectId}/approvals/${approvalId}/diff`);
     return response.data;
   },
 };
