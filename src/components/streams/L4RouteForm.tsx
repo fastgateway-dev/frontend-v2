@@ -1,27 +1,49 @@
 'use client';
 
-// Slim create/edit form for TCP/UDP routes attached to a Stream. L4 routes have
-// no hostname, path matches, filters or security: just a listener port, weighted
-// Kubernetes Service backends and a protocol-gated BackendTrafficPolicy subset.
+// Create/edit form for TCP/UDP routes attached to a Stream, in the same tabs as
+// the domain route form: Basic Info · Backends · Traffic Policy · Preview.
+// L4 routes have no hostname, path matches, filters or security: just a listener
+// port, weighted Kubernetes Service backends and a protocol-gated
+// BackendTrafficPolicy subset. Fields and validation rules are unchanged; the
+// Preview tab shows the server's manifest preview, and the server's 400/409
+// stays authoritative.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, AlertTriangle, Plus, Trash2 } from 'lucide-react';
-import { Button, Card, CardContent, Input, Select, Checkbox } from '@/components/ui';
+import { ArrowLeft, AlertTriangle, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import {
+  Button,
+  Card,
+  CardContent,
+  Input,
+  Select,
+  Checkbox,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from '@/components/ui';
 import { streamsApi, projectTeamsApi, projectNamespacesApi, kubernetesApi, domainTemplatesApi } from '@/lib/api';
 import type { DomainTemplate, ProjectTeamRole, Stream, StreamRoute, K8sService, LoadBalancerType } from '@/types';
+import { L4ManifestDiff, type L4ManifestPair } from './L4ManifestDiff';
 import {
+  L4_FORM_TABS,
   L4_LB_TYPES,
   buildCreateInput,
   buildUpdateInput,
   emptyPolicyForm,
+  errorsForTab,
   findPortCollision,
+  l4RouteKind,
+  mergeTabErrors,
   parseListenerPort,
   policyCapabilities,
-  rangeError,
   routeToFormState,
+  tabErrors,
+  validateL4Form,
   type L4BackendForm,
+  type L4FormTab,
   type L4PolicyForm,
   type L4Protocol,
 } from '@/lib/utils/l4route';
@@ -34,12 +56,21 @@ interface Props {
   routeId?: string;
 }
 
+const TAB_LABELS: Record<L4FormTab, string> = {
+  basic: 'Basic Info',
+  backends: 'Backends',
+  policy: 'Traffic Policy',
+  preview: 'Preview',
+};
+
 const emptyBackend = (): L4BackendForm => ({ namespace: '', service: '', port: '', weight: '100' });
 
 export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const router = useRouter();
   const isEdit = Boolean(routeId);
   const streamUrl = `/projects/${projectId}/streams/${streamId}`;
+  // Edit returns to the L4 route detail page; create returns to the stream.
+  const doneUrl = routeId ? `${streamUrl}/routes/${routeId}` : streamUrl;
 
   const [stream, setStream] = useState<Stream | null>(null);
   const [template, setTemplate] = useState<DomainTemplate | null>(null);
@@ -65,6 +96,13 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<L4FormTab>('basic');
+  const [preview, setPreview] = useState<{ current?: L4ManifestPair; proposed: L4ManifestPair } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  // Only the latest preview request may write state; a slow earlier one is dropped.
+  const previewSeq = useRef(0);
 
   const caps = policyCapabilities(protocol);
   const port = parseListenerPort(portInput);
@@ -163,37 +201,88 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
 
   const patchPolicy = (patch: Partial<L4PolicyForm>) => setPolicy((p) => ({ ...p, ...patch }));
 
-  const validate = (): boolean => {
-    const errs: Record<string, string> = {};
-    if (!isEdit) {
-      if (!name.trim()) errs.name = 'Name is required';
-      if (!teamId) errs.team = 'Owner team is required';
-    }
-    if (port == null) errs.port = 'Listener port must be an integer between 1 and 65535';
-    else if (range && rangeError(port, range.min, range.max)) errs.port = rangeError(port, range.min, range.max) as string;
-    else if (collision) errs.port = `Port ${port}/${protocol.toUpperCase()} is already used by route "${collision.routeName}"`;
-    if (backends.length === 0) errs.backends = 'At least one backend is required';
-    backends.forEach((b, i) => {
-      if (!b.namespace || !b.service) errs[`backend-${i}`] = 'Namespace and service are required';
-      else if (!/^\d+$/.test(b.port) || Number(b.port) < 1 || Number(b.port) > 65535)
-        errs[`backend-${i}`] = 'Backend port must be between 1 and 65535';
-      else if (b.weight !== '' && (!/^\d+$/.test(b.weight) || Number(b.weight) > 100))
-        errs[`backend-${i}`] = 'Weight must be between 0 and 100';
-    });
-    setFormErrors(errs);
-    return Object.keys(errs).length === 0;
+  const validateAll = () => validateL4Form({ isEdit, name, teamId, protocol, port, range, collision, backends });
+
+  const formValues = (listenerPort: number) => ({
+    name: name.trim(),
+    description,
+    teamId,
+    protocol,
+    listenerPort,
+    backends,
+    policy,
+  });
+
+  const goNext = () => {
+    const idx = L4_FORM_TABS.indexOf(activeTab);
+    if (idx >= L4_FORM_TABS.length - 1) return;
+    // Like the domain route form, Next checks only the tab being left.
+    const current = errorsForTab(validateAll(), activeTab);
+    setFormErrors((prev) => mergeTabErrors(prev, activeTab, current));
+    if (Object.keys(current).length === 0) setActiveTab(L4_FORM_TABS[idx + 1]);
   };
+
+  const goBack = () => {
+    const idx = L4_FORM_TABS.indexOf(activeTab);
+    if (idx > 0) setActiveTab(L4_FORM_TABS[idx - 1]);
+  };
+
+  const loadPreview = async () => {
+    const seq = ++previewSeq.current;
+    setPreview(null);
+    setPreviewError(null);
+    if (port == null) {
+      setIsPreviewLoading(false);
+      setPreviewError('Enter a listener port between 1 and 65535 on Basic Info to preview the manifests.');
+      return;
+    }
+    setIsPreviewLoading(true);
+    try {
+      if (isEdit) {
+        const r = await streamsApi.previewUpdateRoute(projectId, streamId, routeId as string, buildUpdateInput(formValues(port)));
+        if (seq !== previewSeq.current) return;
+        setPreview({
+          current: { route: r.currentYaml, btp: r.currentBackendTrafficPolicyYaml },
+          proposed: { route: r.proposedYaml, btp: r.proposedBackendTrafficPolicyYaml },
+        });
+      } else {
+        const r = await streamsApi.previewCreateRoute(projectId, streamId, buildCreateInput(streamId, formValues(port)));
+        if (seq !== previewSeq.current) return;
+        setPreview({ proposed: { route: r.proposedYaml, btp: r.proposedBackendTrafficPolicyYaml } });
+      }
+    } catch (error: unknown) {
+      if (seq !== previewSeq.current) return;
+      const err = error as { response?: { data?: { error?: string } } };
+      // The same 400/409 a submit would get, shown inline on the Preview tab.
+      setPreviewError(err.response?.data?.error || 'Failed to generate preview');
+    } finally {
+      if (seq === previewSeq.current) setIsPreviewLoading(false);
+    }
+  };
+
+  // Re-run the preview every time the Preview tab opens, with the current values.
+  useEffect(() => {
+    if (activeTab === 'preview') loadPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
     setServerPortError(null);
     setWarnings([]);
-    if (!validate() || port == null) return;
+    const errs = validateAll();
+    setFormErrors(errs);
+    const badTabs = tabErrors(errs);
+    if (badTabs.length > 0 || port == null) {
+      // Take the user to the first tab that needs fixing.
+      if (badTabs.length > 0) setActiveTab(badTabs[0]);
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      const values = { name: name.trim(), description, teamId, protocol, listenerPort: port, backends, policy };
+      const values = formValues(port);
       const result = isEdit
         ? await streamsApi.updateRoute(projectId, streamId, routeId as string, buildUpdateInput(values))
         : await streamsApi.createRoute(projectId, streamId, buildCreateInput(streamId, values));
@@ -202,16 +291,17 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
       if (returned.length > 0) {
         // Surface backend warnings (e.g. mixed-protocol LoadBalancer) before leaving.
         setWarnings(returned);
-        setTimeout(() => router.push(streamUrl), 4000);
+        setTimeout(() => router.push(doneUrl), 4000);
       } else {
-        router.push(streamUrl);
+        router.push(doneUrl);
       }
     } catch (error: unknown) {
       const err = error as { response?: { status?: number; data?: { error?: string } } };
       const msg = err.response?.data?.error;
       if (err.response?.status === 409) {
-        // Authoritative port-collision error from the backend.
+        // Authoritative port-collision error from the backend, shown on the port field.
         setServerPortError(msg || 'Listener port is already in use');
+        setActiveTab('basic');
       } else {
         setSubmitError(msg || `Failed to ${isEdit ? 'update' : 'create'} route`);
       }
@@ -231,12 +321,14 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
     );
   }
 
+  const backLabel = isEdit ? 'Back to Route' : 'Back to Stream';
+
   if (loadError || !stream) {
     return (
       <div className="p-8">
-        <Link href={streamUrl} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4">
+        <Link href={doneUrl} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4">
           <ArrowLeft className="h-4 w-4" />
-          Back to Stream
+          {backLabel}
         </Link>
         <p className="text-red-700">{loadError || 'Stream not found'}</p>
       </div>
@@ -247,266 +339,333 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const portWarning = !portError && collision
     ? `Port ${collision.port}/${collision.protocol.toUpperCase()} is already used by route "${collision.routeName}"`
     : null;
+  const errorTabs = tabErrors({ ...formErrors, port: portError });
 
   return (
     <div className="p-8 max-w-3xl">
-      <Link href={streamUrl} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4">
+      <Link href={doneUrl} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4">
         <ArrowLeft className="h-4 w-4" />
-        Back to Stream
+        {backLabel}
       </Link>
       <h1 className="text-2xl font-bold text-gray-900">{isEdit ? `Edit Route: ${name}` : 'Add L4 Route'}</h1>
       <p className="text-gray-600 mt-1 mb-6">Stream: {stream.name}</p>
 
       <form onSubmit={handleSubmit} noValidate className="space-y-6">
         <Card>
-          <CardContent className="pt-6 space-y-4">
-            <Input
-              id="name"
-              label="Name"
-              placeholder="e.g., postgres"
-              value={name}
-              disabled={isEdit}
-              onChange={(e) => setName(e.target.value)}
-              error={formErrors.name}
-            />
-            <Input
-              id="description"
-              label="Description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-            {!isEdit && (
-              <Select
-                id="teamId"
-                label="Owner Team"
-                value={teamId}
-                onChange={(e) => setTeamId(e.target.value)}
-                options={teams.map((t) => ({ value: t.team.id, label: t.team.name }))}
-                error={formErrors.team}
-              />
-            )}
-
-            <fieldset>
-              <legend className="block text-sm font-medium text-gray-700 mb-1">Protocol</legend>
-              <div className="flex gap-6">
-                {(['tcp', 'udp'] as const).map((p) => (
-                  <label key={p} className="flex items-center gap-2 text-sm text-gray-900">
-                    <input
-                      type="radio"
-                      name="protocol"
-                      value={p}
-                      checked={protocol === p}
-                      disabled={isEdit}
-                      onChange={() => setProtocol(p)}
-                    />
-                    {p.toUpperCase()}
-                  </label>
+          <CardContent className="pt-6">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as L4FormTab)} defaultValue="basic">
+              <TabsList className="mb-2">
+                {L4_FORM_TABS.map((t) => (
+                  <TabsTrigger key={t} value={t}>
+                    {TAB_LABELS[t]}
+                    {errorTabs.includes(t) && (
+                      <span data-testid={`tab-error-${t}`} className="ml-1 text-red-500">
+                        *
+                      </span>
+                    )}
+                  </TabsTrigger>
                 ))}
-              </div>
-            </fieldset>
+              </TabsList>
 
-            <div>
-              <Input
-                id="listenerPort"
-                label="Listener Port"
-                inputMode="numeric"
-                placeholder="e.g., 5432"
-                value={portInput}
-                onChange={(e) => {
-                  setPortInput(e.target.value);
-                  setServerPortError(null);
-                }}
-                error={portError}
-              />
-              {portWarning && (
-                <p role="alert" data-testid="port-collision" className="mt-1 text-sm text-amber-700">
-                  {portWarning}
-                </p>
-              )}
-              <p className="mt-1 text-xs text-gray-500">
-                The Gateway listener port this route is exposed on. A port can be used once per protocol.
-                {range && <> Allowed range: {range.min}–{range.max}.</>}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6 space-y-4">
-            <h2 className="text-lg font-semibold text-gray-900">Backends</h2>
-            {namespaces.length === 0 && (
-              <p className="text-sm text-amber-700">
-                No project namespaces with a ReferenceGrant are available. Add one under Namespaces first.
-              </p>
-            )}
-            {backends.map((b, i) => (
-              <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2" data-testid="backend-row">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <Select
-                    id={`backend-ns-${i}`}
-                    label="Namespace"
-                    value={b.namespace}
-                    onChange={(e) => onNamespaceChange(i, e.target.value)}
-                    options={[{ value: '', label: 'Select...' }, ...namespaces.map((n) => ({ value: n, label: n }))]}
-                  />
-                  <Select
-                    id={`backend-svc-${i}`}
-                    label="Service"
-                    value={b.service}
-                    onChange={(e) => onServiceChange(i, e.target.value)}
-                    options={[
-                      { value: '', label: 'Select...' },
-                      ...(servicesByNs[b.namespace] || []).map((s) => ({ value: s.name, label: s.name })),
-                    ]}
+              <TabsContent value="basic">
+                <div className="space-y-4">
+                  <Input
+                    id="name"
+                    label="Name"
+                    placeholder="e.g., postgres"
+                    value={name}
+                    disabled={isEdit}
+                    onChange={(e) => setName(e.target.value)}
+                    error={formErrors.name}
                   />
                   <Input
-                    id={`backend-port-${i}`}
-                    label="Port"
-                    inputMode="numeric"
-                    value={b.port}
-                    onChange={(e) => updateBackend(i, { port: e.target.value })}
+                    id="description"
+                    label="Description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
                   />
-                  <Input
-                    id={`backend-weight-${i}`}
-                    label="Weight"
-                    inputMode="numeric"
-                    value={b.weight}
-                    onChange={(e) => updateBackend(i, { weight: e.target.value })}
-                  />
+                  {!isEdit && (
+                    <Select
+                      id="teamId"
+                      label="Owner Team"
+                      value={teamId}
+                      onChange={(e) => setTeamId(e.target.value)}
+                      options={teams.map((t) => ({ value: t.team.id, label: t.team.name }))}
+                      error={formErrors.team}
+                    />
+                  )}
+
+                  <fieldset>
+                    <legend className="block text-sm font-medium text-gray-700 mb-1">Protocol</legend>
+                    <div className="flex gap-6">
+                      {(['tcp', 'udp'] as const).map((p) => (
+                        <label key={p} className="flex items-center gap-2 text-sm text-gray-900">
+                          <input
+                            type="radio"
+                            name="protocol"
+                            value={p}
+                            checked={protocol === p}
+                            disabled={isEdit}
+                            onChange={() => setProtocol(p)}
+                          />
+                          {p.toUpperCase()}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+
+                  <div>
+                    <Input
+                      id="listenerPort"
+                      label="Listener Port"
+                      inputMode="numeric"
+                      placeholder="e.g., 5432"
+                      value={portInput}
+                      onChange={(e) => {
+                        setPortInput(e.target.value);
+                        setServerPortError(null);
+                      }}
+                      error={portError}
+                    />
+                    {portWarning && (
+                      <p role="alert" data-testid="port-collision" className="mt-1 text-sm text-amber-700">
+                        {portWarning}
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-gray-500">
+                      The Gateway listener port this route is exposed on. A port can be used once per protocol.
+                      {range && <> Allowed range: {range.min}–{range.max}.</>}
+                    </p>
+                  </div>
                 </div>
-                {formErrors[`backend-${i}`] && <p className="text-sm text-red-600">{formErrors[`backend-${i}`]}</p>}
-                {backends.length > 1 && (
+              </TabsContent>
+
+              <TabsContent value="backends">
+                <div className="space-y-4">
+                  {namespaces.length === 0 && (
+                    <p className="text-sm text-amber-700">
+                      No project namespaces with a ReferenceGrant are available. Add one under Namespaces first.
+                    </p>
+                  )}
+                  {backends.map((b, i) => (
+                    <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2" data-testid="backend-row">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <Select
+                          id={`backend-ns-${i}`}
+                          label="Namespace"
+                          value={b.namespace}
+                          onChange={(e) => onNamespaceChange(i, e.target.value)}
+                          options={[{ value: '', label: 'Select...' }, ...namespaces.map((n) => ({ value: n, label: n }))]}
+                        />
+                        <Select
+                          id={`backend-svc-${i}`}
+                          label="Service"
+                          value={b.service}
+                          onChange={(e) => onServiceChange(i, e.target.value)}
+                          options={[
+                            { value: '', label: 'Select...' },
+                            ...(servicesByNs[b.namespace] || []).map((s) => ({ value: s.name, label: s.name })),
+                          ]}
+                        />
+                        <Input
+                          id={`backend-port-${i}`}
+                          label="Port"
+                          inputMode="numeric"
+                          value={b.port}
+                          onChange={(e) => updateBackend(i, { port: e.target.value })}
+                        />
+                        <Input
+                          id={`backend-weight-${i}`}
+                          label="Weight"
+                          inputMode="numeric"
+                          value={b.weight}
+                          onChange={(e) => updateBackend(i, { weight: e.target.value })}
+                        />
+                      </div>
+                      {formErrors[`backend-${i}`] && <p className="text-sm text-red-600">{formErrors[`backend-${i}`]}</p>}
+                      {backends.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setBackends((prev) => prev.filter((_, idx) => idx !== i))}
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  {formErrors.backends && <p className="text-sm text-red-600">{formErrors.backends}</p>}
                   <Button
                     type="button"
                     variant="secondary"
                     size="sm"
-                    onClick={() => setBackends((prev) => prev.filter((_, idx) => idx !== i))}
+                    onClick={() => setBackends((prev) => [...prev, { ...emptyBackend(), namespace: namespaces[0] ?? '' }])}
                   >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Remove
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add backend
+                  </Button>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="policy">
+                <div className="space-y-6">
+                  {protocol === 'udp' && (
+                    <p className="text-sm text-gray-500" data-testid="udp-policy-note">
+                      UDP routes support load balancing only. Circuit breaker and health checks do not apply to datagrams.
+                    </p>
+                  )}
+
+                  {caps.loadBalancer && (
+                    <section className="space-y-2">
+                      <h3 className="text-sm font-semibold text-gray-900">Load balancing</h3>
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <Checkbox
+                          aria-label="Enable load balancer"
+                          checked={policy.lbEnabled}
+                          onChange={(e) => patchPolicy({ lbEnabled: e.target.checked })}
+                        />
+                        Set a load balancing algorithm
+                      </label>
+                      {policy.lbEnabled && (
+                        <Select
+                          id="lbType"
+                          aria-label="Load balancer type"
+                          value={policy.lbType}
+                          onChange={(e) => patchPolicy({ lbType: e.target.value as LoadBalancerType })}
+                          options={L4_LB_TYPES.map((t) => ({ value: t, label: t }))}
+                        />
+                      )}
+                    </section>
+                  )}
+
+                  {caps.circuitBreaker && (
+                    <section className="space-y-2">
+                      <h3 className="text-sm font-semibold text-gray-900">Circuit breaker</h3>
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <Checkbox
+                          aria-label="Enable circuit breaker"
+                          checked={policy.cbEnabled}
+                          onChange={(e) => patchPolicy({ cbEnabled: e.target.checked })}
+                        />
+                        Limit connections
+                      </label>
+                      {policy.cbEnabled && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <Input
+                            id="cbMaxConnections"
+                            label="Max connections"
+                            inputMode="numeric"
+                            value={policy.cbMaxConnections}
+                            onChange={(e) => patchPolicy({ cbMaxConnections: e.target.value })}
+                          />
+                          <Input
+                            id="cbMaxRequestsPerConnection"
+                            label="Max requests per connection"
+                            inputMode="numeric"
+                            value={policy.cbMaxRequestsPerConnection}
+                            onChange={(e) => patchPolicy({ cbMaxRequestsPerConnection: e.target.value })}
+                          />
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  {caps.healthCheck && (
+                    <section className="space-y-2">
+                      <h3 className="text-sm font-semibold text-gray-900">Health check</h3>
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <Checkbox
+                          aria-label="Enable health check"
+                          checked={policy.hcEnabled}
+                          onChange={(e) => patchPolicy({ hcEnabled: e.target.checked })}
+                        />
+                        Active TCP health check
+                      </label>
+                      {policy.hcEnabled && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <Input
+                            id="hcInterval"
+                            label="Interval"
+                            placeholder="e.g., 10s"
+                            value={policy.hcInterval}
+                            onChange={(e) => patchPolicy({ hcInterval: e.target.value })}
+                          />
+                          <Input
+                            id="hcTimeout"
+                            label="Timeout"
+                            placeholder="e.g., 1s"
+                            value={policy.hcTimeout}
+                            onChange={(e) => patchPolicy({ hcTimeout: e.target.value })}
+                          />
+                          <Input
+                            id="hcUnhealthy"
+                            label="Unhealthy threshold"
+                            inputMode="numeric"
+                            value={policy.hcUnhealthyThreshold}
+                            onChange={(e) => patchPolicy({ hcUnhealthyThreshold: e.target.value })}
+                          />
+                          <Input
+                            id="hcHealthy"
+                            label="Healthy threshold"
+                            inputMode="numeric"
+                            value={policy.hcHealthyThreshold}
+                            onChange={(e) => patchPolicy({ hcHealthyThreshold: e.target.value })}
+                          />
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="preview">
+                {isPreviewLoading ? (
+                  <p className="text-sm text-gray-500">Generating preview…</p>
+                ) : previewError ? (
+                  <div
+                    role="alert"
+                    data-testid="preview-error"
+                    className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700"
+                  >
+                    {previewError}
+                  </div>
+                ) : preview ? (
+                  <L4ManifestDiff routeKind={l4RouteKind(protocol)} current={preview.current} proposed={preview.proposed} />
+                ) : null}
+              </TabsContent>
+            </Tabs>
+
+            <div className="flex justify-between items-center mt-6 pt-6 border-t">
+              <div>
+                {activeTab !== 'basic' && (
+                  <Button type="button" variant="secondary" onClick={goBack}>
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Back
                   </Button>
                 )}
               </div>
-            ))}
-            {formErrors.backends && <p className="text-sm text-red-600">{formErrors.backends}</p>}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setBackends((prev) => [...prev, { ...emptyBackend(), namespace: namespaces[0] ?? '' }])}
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Add backend
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6 space-y-4">
-            <h2 className="text-lg font-semibold text-gray-900">Advanced ({protocol.toUpperCase()} policy)</h2>
-            {protocol === 'udp' && (
-              <p className="text-sm text-gray-500" data-testid="udp-policy-note">
-                UDP routes support load balancing only. Circuit breaker and health checks do not apply to datagrams.
-              </p>
-            )}
-
-            {caps.loadBalancer && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                  <Checkbox
-                    aria-label="Enable load balancer"
-                    checked={policy.lbEnabled}
-                    onChange={(e) => patchPolicy({ lbEnabled: e.target.checked })}
-                  />
-                  Load balancing algorithm
-                </label>
-                {policy.lbEnabled && (
-                  <Select
-                    id="lbType"
-                    aria-label="Load balancer type"
-                    value={policy.lbType}
-                    onChange={(e) => patchPolicy({ lbType: e.target.value as LoadBalancerType })}
-                    options={L4_LB_TYPES.map((t) => ({ value: t, label: t }))}
-                  />
+              <div className="flex gap-3">
+                <Link href={doneUrl}>
+                  <Button type="button" variant="secondary">
+                    Cancel
+                  </Button>
+                </Link>
+                {/* Distinct keys: React must replace (not retype) the button, or the click
+                    that opens Preview would submit the form once it becomes type=submit. */}
+                {activeTab !== 'preview' ? (
+                  <Button key="next" type="button" onClick={goNext}>
+                    Next
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                ) : (
+                  <Button key="submit" type="submit" isLoading={isSubmitting} disabled={warnings.length > 0}>
+                    {isEdit ? 'Save Changes' : 'Create Route'}
+                  </Button>
                 )}
               </div>
-            )}
-
-            {caps.circuitBreaker && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                  <Checkbox
-                    aria-label="Enable circuit breaker"
-                    checked={policy.cbEnabled}
-                    onChange={(e) => patchPolicy({ cbEnabled: e.target.checked })}
-                  />
-                  Circuit breaker
-                </label>
-                {policy.cbEnabled && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <Input
-                      id="cbMaxConnections"
-                      label="Max connections"
-                      inputMode="numeric"
-                      value={policy.cbMaxConnections}
-                      onChange={(e) => patchPolicy({ cbMaxConnections: e.target.value })}
-                    />
-                    <Input
-                      id="cbMaxRequestsPerConnection"
-                      label="Max requests per connection"
-                      inputMode="numeric"
-                      value={policy.cbMaxRequestsPerConnection}
-                      onChange={(e) => patchPolicy({ cbMaxRequestsPerConnection: e.target.value })}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {caps.healthCheck && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                  <Checkbox
-                    aria-label="Enable health check"
-                    checked={policy.hcEnabled}
-                    onChange={(e) => patchPolicy({ hcEnabled: e.target.checked })}
-                  />
-                  Active TCP health check
-                </label>
-                {policy.hcEnabled && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <Input
-                      id="hcInterval"
-                      label="Interval"
-                      placeholder="e.g., 10s"
-                      value={policy.hcInterval}
-                      onChange={(e) => patchPolicy({ hcInterval: e.target.value })}
-                    />
-                    <Input
-                      id="hcTimeout"
-                      label="Timeout"
-                      placeholder="e.g., 1s"
-                      value={policy.hcTimeout}
-                      onChange={(e) => patchPolicy({ hcTimeout: e.target.value })}
-                    />
-                    <Input
-                      id="hcUnhealthy"
-                      label="Unhealthy threshold"
-                      inputMode="numeric"
-                      value={policy.hcUnhealthyThreshold}
-                      onChange={(e) => patchPolicy({ hcUnhealthyThreshold: e.target.value })}
-                    />
-                    <Input
-                      id="hcHealthy"
-                      label="Healthy threshold"
-                      inputMode="numeric"
-                      value={policy.hcHealthyThreshold}
-                      onChange={(e) => patchPolicy({ hcHealthyThreshold: e.target.value })}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+            </div>
           </CardContent>
         </Card>
 
@@ -537,17 +696,6 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
             </div>
           </div>
         )}
-
-        <div className="flex justify-end gap-3">
-          <Link href={streamUrl}>
-            <Button type="button" variant="secondary">
-              Cancel
-            </Button>
-          </Link>
-          <Button type="submit" isLoading={isSubmitting} disabled={warnings.length > 0}>
-            {isEdit ? 'Save Changes' : 'Create Route'}
-          </Button>
-        </div>
       </form>
     </div>
   );
