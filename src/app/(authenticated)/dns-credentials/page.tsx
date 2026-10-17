@@ -229,7 +229,7 @@ export default function DNSCredentialsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">DNS Credentials</h1>
           <p className="text-gray-600 mt-1">
-            Manage DNS provider credentials used for ACME DNS-01 challenges
+            Manage DNS provider credentials used for ACME DNS-01 challenges and direct DNS record management
           </p>
         </div>
         <Button onClick={openCreateModal}>
@@ -256,7 +256,7 @@ export default function DNSCredentialsPage() {
             <KeyRound className="h-12 w-12 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No DNS credentials yet.</h3>
             <p className="text-gray-600 mb-4">
-              Add a DNS provider credential to enable DNS-01 challenges for certificate issuance.
+              Add a DNS provider credential to enable DNS-01 certificate challenges and hosted zone DNS records.
             </p>
             <Button onClick={openCreateModal}>
               <Plus className="h-4 w-4 mr-2" />
