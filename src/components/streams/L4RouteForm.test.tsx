@@ -120,15 +120,23 @@ test('Next checks only the current tab, then advances; Back returns', async () =
 });
 
 // Review Focus: the Next -> submit button swap must not submit the form.
+// In a browser, React commits before the click's default action, so if the
+// two buttons shared a DOM node the same click would submit. jsdom runs the
+// default action first and cannot show that, so the guard is asserted
+// directly: the submit button must be a different node from Next (distinct
+// React keys), never Next re-typed in place.
 test('stepping into Preview with Next does not submit the form', async () => {
   (streamsApi.createRoute as jest.Mock).mockResolvedValue({ id: 'r9' });
   await renderCreate();
   await fillValid('6379');
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
   expect(screen.getByLabelText('Enable load balancer')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  const next = screen.getByRole('button', { name: 'Next' });
+  fireEvent.click(next);
   expect(await screen.findByText('kind: TCPRoute')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Create Route' })).toBeInTheDocument();
+  const submit = screen.getByRole('button', { name: 'Create Route' });
+  expect(submit).not.toBe(next);
+  expect(next).not.toBeInTheDocument();
   expect(streamsApi.createRoute).not.toHaveBeenCalled();
 });
 
