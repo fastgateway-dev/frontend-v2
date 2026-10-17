@@ -1,0 +1,148 @@
+// Pure helpers for a Stream's entry point: mode wording, the port map split
+// (this stream's ports vs neighbours), the free-port count and owner labels.
+// Kept free of React so they can be unit-tested directly.
+import type {
+  DomainTemplate,
+  EntrypointMode,
+  EntrypointPort,
+  EntrypointPortOwner,
+  PortRange,
+  ReservedPort,
+  ReservedPortReason,
+  StreamEntrypoint,
+  TransportPort,
+} from '@/types';
+
+export interface EntrypointLabel {
+  badge: 'Dedicated IP' | 'Shared IP';
+  explanation: string;
+}
+
+export function entrypointLabel(mode: EntrypointMode): EntrypointLabel {
+  return mode === 'shared'
+    ? {
+        badge: 'Shared IP',
+        explanation:
+          "This stream is a named group of ports on the template's shared entry point. Ports are unique across everything on it.",
+      }
+    : { badge: 'Dedicated IP', explanation: 'This stream has its own entry point and IP.' };
+}
+
+/** mergeGateways true -> shared, false -> dedicated (the backend's rule). */
+export function templateMode(t: Pick<DomainTemplate, 'mergeGateways'>): EntrypointMode {
+  return t.mergeGateways ? 'shared' : 'dedicated';
+}
+
+/** Stream-create template option, e.g. "shared-envoy — Shared IP". */
+export function templateOptionLabel(t: Pick<DomainTemplate, 'name' | 'mergeGateways'>): string {
+  return `${t.name} — ${entrypointLabel(templateMode(t)).badge}`;
+}
+
+/** "5432/TCP". */
+export function portLabel(p: TransportPort): string {
+  return `${p.port}/${p.transport.toUpperCase()}`;
+}
+
+/** By port, then transport (TCP before UDP). */
+export function comparePorts(a: TransportPort, b: TransportPort): number {
+  return a.port - b.port || a.transport.localeCompare(b.transport);
+}
+
+/**
+ * mine = this stream's own route ports; neighbors = everything else on the entry
+ * point (other streams' routes, domains). With no streamId (stream create) every
+ * port is a neighbour.
+ */
+export function splitPorts(
+  ports: EntrypointPort[],
+  streamId?: string
+): { mine: EntrypointPort[]; neighbors: EntrypointPort[] } {
+  const mine: EntrypointPort[] = [];
+  const neighbors: EntrypointPort[] = [];
+  for (const p of ports) {
+    if (streamId && p.owner.kind === 'stream_route' && p.owner.streamId === streamId) mine.push(p);
+    else neighbors.push(p);
+  }
+  return { mine: mine.sort(comparePorts), neighbors: neighbors.sort(comparePorts) };
+}
+
+export function rangeSize(range: PortRange): number {
+  return Math.max(0, range.max - range.min + 1);
+}
+
+/**
+ * Port numbers in [min, max] that no listed port and no reservation holds, on any
+ * transport. Conservative on purpose: reservations are transport-agnostic on the
+ * backend, and a number used on one transport is counted as taken, so the UI
+ * never calls a port free that create would reject. Null when there is no range.
+ */
+export function freePortCount(
+  range: PortRange | null,
+  ports: TransportPort[],
+  reserved: TransportPort[]
+): number | null {
+  if (!range || range.max < range.min) return null;
+  const taken = new Set<number>();
+  for (const p of [...ports, ...reserved]) {
+    if (p.port >= range.min && p.port <= range.max) taken.add(p.port);
+  }
+  return rangeSize(range) - taken.size;
+}
+
+// Mirrors RESERVED_PORTS in gateway-listeners.ts / the backend DefaultReservedPorts.
+// Validation rejects these numbers on both transports, so both are listed.
+const PLATFORM_RESERVED: ReservedPort[] = (
+  [
+    [19000, 'envoy_internal'],
+    [19001, 'envoy_internal'],
+    [60000, 'placeholder'],
+  ] as const
+).flatMap(([port, reason]) =>
+  (['TCP', 'UDP'] as const).map((transport) => ({ transport, port, reason }))
+);
+
+const reservedKey = (r: TransportPort) => `${r.transport}/${r.port}`;
+
+/** The response's reserved list plus any platform entry it left out (keyed by transport + port), sorted. */
+export function withDefaultReserved(reserved: ReservedPort[]): ReservedPort[] {
+  const have = new Set(reserved.map(reservedKey));
+  return [...reserved, ...PLATFORM_RESERVED.filter((r) => !have.has(reservedKey(r)))].sort(comparePorts);
+}
+
+/** Display lines: one per (port, reason), transports merged — "19000/TCP+UDP (Envoy internal)". */
+export function reservedSummary(reserved: ReservedPort[]): string[] {
+  const groups = new Map<string, { port: number; reason: ReservedPortReason; transports: string[] }>();
+  for (const r of [...reserved].sort(comparePorts)) {
+    const key = `${r.port}|${r.reason}`;
+    const g = groups.get(key) ?? { port: r.port, reason: r.reason, transports: [] };
+    if (!g.transports.includes(r.transport)) g.transports.push(r.transport);
+    groups.set(key, g);
+  }
+  return [...groups.values()].map(
+    (g) => `${g.port}/${g.transports.join('+')} (${REASON_LABELS[g.reason] ?? g.reason})`
+  );
+}
+
+const REASON_LABELS: Record<ReservedPortReason, string> = {
+  envoy_internal: 'Envoy internal',
+  placeholder: 'Placeholder listener',
+  template_listener: 'Template listener',
+};
+
+/** "19000/TCP (Envoy internal)". */
+export function reservedLabel(r: ReservedPort): string {
+  return `${portLabel(r)} (${REASON_LABELS[r.reason] ?? r.reason})`;
+}
+
+/** "Stream cache · route redis" or "Domain api". */
+export function ownerLabel(owner: EntrypointPortOwner): string {
+  if (owner.kind === 'domain') return `Domain ${owner.domainName || owner.domainId || 'unknown'}`;
+  return `Stream ${owner.streamName || owner.streamId || 'unknown'} · route ${owner.routeName || owner.routeId || 'unknown'}`;
+}
+
+const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+/** "2 streams and 1 domain". */
+export function sharedWithSummary(sharedWith: StreamEntrypoint['sharedWith']): string {
+  return `${plural(sharedWith.streams.length, 'stream')} and ${plural(sharedWith.domains.length, 'domain')}`;
+}
