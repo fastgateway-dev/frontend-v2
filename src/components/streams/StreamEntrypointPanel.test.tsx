@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { StreamEntrypointPanel } from './StreamEntrypointPanel';
 
 jest.mock('@/lib/api', () => ({ streamsApi: { getEntrypoint: jest.fn() } }));
@@ -96,4 +96,20 @@ test('reserved platform ports are shown even if the response omits them', async 
   expect(screen.getByTestId('reserved-ports')).toHaveTextContent(
     '19000/TCP+UDP (Envoy internal), 19001/TCP+UDP (Envoy internal), 60000/TCP+UDP (Placeholder listener)'
   );
+});
+
+// The headline counts distinct ports: several domains binding the same
+// listener ports are one entry per port, while the expanded list still names
+// every owner.
+test('neighbour count is distinct ports, not owner rows', async () => {
+  const dom = (port: number, id: string) => ({ transport: 'TCP', port, owner: { kind: 'domain', domainId: id, domainName: id } });
+  (streamsApi.getEntrypoint as jest.Mock).mockResolvedValue({
+    ...SHARED,
+    ports: [MINE, dom(443, 'api'), dom(443, 'web'), dom(80, 'api'), dom(80, 'web')],
+  });
+  renderPanel();
+  const panel = await screen.findByTestId('entrypoint-panel');
+  await waitFor(() => expect(panel).toHaveTextContent('2 ports used by other streams/domains.'));
+  fireEvent.click(screen.getByRole('button', { name: 'Show other ports' }));
+  expect(screen.getByTestId('neighbor-ports').querySelectorAll('li')).toHaveLength(4);
 });

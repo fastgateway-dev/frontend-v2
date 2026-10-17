@@ -134,6 +134,14 @@ export function reservedLabel(r: ReservedPort): string {
   return `${portLabel(r)} (${REASON_LABELS[r.reason] ?? r.reason})`;
 }
 
+/**
+ * Distinct (transport, port) pairs held. Owner rows are not ports: several
+ * domains binding the same listener port are one port.
+ */
+export function distinctPortCount(ports: TransportPort[]): number {
+  return new Set(ports.map((p) => `${p.transport}/${p.port}`)).size;
+}
+
 /** "Stream cache · route redis" or "Domain api". */
 export function ownerLabel(owner: EntrypointPortOwner): string {
   if (owner.kind === 'domain') return `Domain ${owner.domainName || owner.domainId || 'unknown'}`;

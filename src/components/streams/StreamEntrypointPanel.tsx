@@ -11,6 +11,7 @@ import { Badge, Card, CardContent } from '@/components/ui';
 import { streamsApi } from '@/lib/api';
 import type { StreamEntrypoint } from '@/types';
 import {
+  distinctPortCount,
   entrypointLabel,
   freePortCount,
   ownerLabel,
@@ -82,6 +83,7 @@ export function StreamEntrypointPanel({ projectId, streamId, refreshKey = 0 }: P
 
   const label = entrypointLabel(entrypoint.mode);
   const { mine, neighbors } = splitPorts(entrypoint.ports, streamId);
+  const neighborPorts = distinctPortCount(neighbors);
   const reserved = withDefaultReserved(entrypoint.reserved);
   const range = entrypoint.portRange;
   const free = freePortCount(range, entrypoint.ports, reserved);
@@ -183,7 +185,7 @@ export function StreamEntrypointPanel({ projectId, streamId, refreshKey = 0 }: P
           {neighbors.length > 0 && (
             <div>
               <p className="text-gray-700">
-                {neighbors.length} {neighbors.length === 1 ? 'port' : 'ports'} used by other streams/domains.{' '}
+                {neighborPorts} {neighborPorts === 1 ? 'port' : 'ports'} used by other streams/domains.{' '}
                 <button
                   type="button"
                   className="text-primary-600 hover:underline"

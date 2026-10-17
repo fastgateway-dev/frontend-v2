@@ -1,4 +1,5 @@
 import {
+  distinctPortCount,
   entrypointLabel,
   freePortCount,
   ownerLabel,
@@ -151,4 +152,21 @@ test('sharedWithSummary pluralises', () => {
       domains: [{ id: 'd', name: 'd', hostname: 'd.example.com' }],
     })
   ).toBe('2 streams and 1 domain');
+});
+
+describe('distinctPortCount', () => {
+  test('counts ports, not owner rows: two domains on the same listener port are one port', () => {
+    const d = (port: number, domainId: string): EntrypointPort => ({
+      transport: 'TCP',
+      port,
+      owner: { kind: 'domain', domainId, domainName: domainId },
+    });
+    expect(distinctPortCount([d(443, 'd1'), d(443, 'd2'), d(80, 'd1'), d(80, 'd2'), other(9001)])).toBe(3);
+  });
+  test('the same number on TCP and UDP is two ports', () => {
+    expect(distinctPortCount([mine(53), mine(53, 'UDP')])).toBe(2);
+  });
+  test('no ports is zero', () => {
+    expect(distinctPortCount([])).toBe(0);
+  });
 });
