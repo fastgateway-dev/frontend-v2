@@ -7,13 +7,15 @@ import { CheckCircle, Clock, Eye, Route, Shield, Lock, XCircle, MinusCircle } fr
 import { Button, Card, CardContent, Badge, Tabs, TabsList, TabsTrigger, TabsContent, Select } from '@/components/ui';
 import { approvalsApi, clientAttachmentsApi } from '@/lib/api';
 import type { ApprovalRequest, Approval, ApprovalStatus, ApprovalStage } from '@/types';
+import { approvalContextLabel } from '@/lib/utils/approval-labels';
 
 // Unified approval item for display
 interface UnifiedApproval {
   id: string;
   entityType: 'route' | 'client_attachment' | 'certificate';
   entityName: string;
-  domainName?: string;
+  /** "Stream: x" for L4 routes; the domain for L7 routes and client attachments. */
+  contextLabel?: string | null;
   action: string;
   status: ApprovalStatus;
   submitter?: { id: string; username: string };
@@ -67,7 +69,7 @@ export default function ApprovalsPage() {
           id: r.id,
           entityType,
           entityName,
-          domainName: r.domainName,
+          contextLabel: approvalContextLabel(r),
           action: r.action,
           status: r.status,
           submitter: r.submitter ? { id: r.submittedBy, username: r.submitter.username } : undefined,
@@ -90,7 +92,7 @@ export default function ApprovalsPage() {
         id: c.id,
         entityType: 'client_attachment' as const,
         entityName: c.entityName || 'Client Attachment',
-        domainName: c.domainName,
+        contextLabel: c.domainName,
         action: c.action,
         status: c.status,
         submitter: c.submitter ? { id: c.submittedBy, username: c.submitter.username } : undefined,
@@ -338,9 +340,9 @@ export default function ApprovalsPage() {
                               {approval.entityName}
                             </h3>
                           </div>
-                          {approval.domainName && (
+                          {approval.contextLabel && (
                             <p className="text-sm text-gray-600 mb-0.5">
-                              {approval.domainName}
+                              {approval.contextLabel}
                             </p>
                           )}
                           <p className="text-sm text-gray-500">

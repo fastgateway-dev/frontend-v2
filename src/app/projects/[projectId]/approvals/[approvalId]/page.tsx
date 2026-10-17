@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { ArrowLeft, CheckCircle, XCircle, Clock, Loader2, Sparkles } from 'lucide-react';
 import { Button, Card, CardContent, Badge } from '@/components/ui';
 import { approvalsApi, aiApi } from '@/lib/api';
-import type { ApprovalRequest, ApprovalStage, AIReviewResult } from '@/types';
+import type { ApprovalRequest, ApprovalStage, ApprovalDiff } from '@/types';
+import { approvalContextLabel, diffSectionTitles } from '@/lib/utils/approval-labels';
 import { YamlDiffViewer } from '@/components/features/yaml-diff-viewer';
 import { AIReviewCard } from '@/components/features/ai-review-card';
 import { CommentFeed } from '@/components/features/comment-feed';
@@ -24,21 +25,7 @@ export default function ApprovalReviewPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Diff state
-  const [diffData, setDiffData] = useState<{
-    action: string;
-    currentYaml?: string;
-    proposedYaml?: string;
-    currentSecurityPolicyYaml?: string;
-    proposedSecurityPolicyYaml?: string;
-    currentBackendTrafficPolicyYaml?: string;
-    proposedBackendTrafficPolicyYaml?: string;
-    currentEnvoyExtensionPolicyYaml?: string;
-    proposedEnvoyExtensionPolicyYaml?: string;
-    currentBackendYaml?: string;
-    proposedBackendYaml?: string;
-    changeDescription?: string;
-    aiReview?: AIReviewResult;
-  } | null>(null);
+  const [diffData, setDiffData] = useState<ApprovalDiff | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [isReviewingAI, setIsReviewingAI] = useState(false);
@@ -210,6 +197,9 @@ export default function ApprovalReviewPage() {
     );
   }
 
+  const contextLabel = approvalContextLabel(approval);
+  const titles = diffSectionTitles(diffData?.routeKind);
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
       <Link
@@ -228,8 +218,13 @@ export default function ApprovalReviewPage() {
             {getActionBadge(approval.action)}
           </div>
           <p className="text-gray-600">
-            {approval.configSnapshot?.matches?.[0]?.path?.value || 'Route'}
+            {approval.configSnapshot?.matches?.[0]?.path?.value || approval.entityName || approval.route?.name || 'Route'}
           </p>
+          {contextLabel && (
+            <p className="text-sm text-gray-600" data-testid="approval-context">
+              {contextLabel}
+            </p>
+          )}
           <p className="text-sm text-gray-500 mt-1">
             Submitted by {approval.submitter?.username || 'Unknown'} on{' '}
             {new Date(approval.createdAt).toLocaleString()}
@@ -317,7 +312,7 @@ export default function ApprovalReviewPage() {
         {diffData && (diffData.currentYaml || diffData.proposedYaml) && (
           <Card>
             <CardContent className="pt-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">HTTPRoute Changes</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">{titles.route}</h2>
               <YamlDiffViewer
                 currentYaml={diffData.currentYaml}
                 proposedYaml={diffData.proposedYaml || ''}
@@ -345,7 +340,7 @@ export default function ApprovalReviewPage() {
         {diffData && (diffData.currentBackendTrafficPolicyYaml || diffData.proposedBackendTrafficPolicyYaml) && (
           <Card>
             <CardContent className="pt-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">BackendTrafficPolicy Changes (Compression)</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">{titles.backendTrafficPolicy}</h2>
               <YamlDiffViewer
                 currentYaml={diffData.currentBackendTrafficPolicyYaml}
                 proposedYaml={diffData.proposedBackendTrafficPolicyYaml || ''}
