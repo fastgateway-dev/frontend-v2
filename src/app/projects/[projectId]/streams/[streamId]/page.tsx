@@ -3,10 +3,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Trash2, AlertTriangle, Plus, Pencil, Rocket } from 'lucide-react';
-import { Button, Card, CardContent, Badge, Modal } from '@/components/ui';
+import { ArrowLeft, Trash2, AlertTriangle, Plus, Rocket } from 'lucide-react';
+import { Button, Card, CardContent, Badge, Modal, Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
 import { streamsApi, permissionsApi } from '@/lib/api';
 import { L4MetricsCard } from '@/components/metrics/L4MetricsCard';
+import { StreamEntrypointPanel } from '@/components/streams/StreamEntrypointPanel';
+import { StreamManifests } from '@/components/streams/StreamManifests';
+import { l4StatusBadge } from '@/lib/utils/l4route';
 import type { Stream, StreamRoute, ProjectPermissions } from '@/types';
 
 export default function StreamDetailPage() {
@@ -26,6 +29,8 @@ export default function StreamDetailPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deployingRouteId, setDeployingRouteId] = useState<string | null>(null);
   const [routeActionError, setRouteActionError] = useState<string | null>(null);
+  // Bumped after a deploy so the Entry point panel re-reads port statuses.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     loadData();
@@ -72,6 +77,7 @@ export default function StreamDetailPage() {
     try {
       await streamsApi.deployRoute(projectId, streamId, routeId);
       await loadData();
+      setRefreshKey((k) => k + 1);
     } catch (error: unknown) {
       const err = error as { response?: { data?: { error?: string } } };
       setRouteActionError(err.response?.data?.error || 'Failed to deploy route');
@@ -82,31 +88,10 @@ export default function StreamDetailPage() {
 
   const canDeployRoute = (route: StreamRoute) => route.status === 'approved' || route.status === 'pending_deploy';
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'active':
-        return <Badge variant="success">Active</Badge>;
-      case 'approved':
-        return <Badge variant="info">Approved - Ready to Deploy</Badge>;
-      case 'pending':
-      case 'pending_deploy':
-      case 'pending_create':
-      case 'pending_update':
-      case 'pending_delete':
-        return <Badge variant="warning">{status === 'pending' ? 'Pending' : 'Pending Approval'}</Badge>;
-      case 'error':
-      case 'rejected':
-        return <Badge variant="error">{status === 'error' ? 'Error' : 'Rejected'}</Badge>;
-      default:
-        return <Badge>{status}</Badge>;
-    }
+  const statusBadge = (status: string) => {
+    const b = l4StatusBadge(status);
+    return <Badge variant={b.variant}>{b.label}</Badge>;
   };
-
-  // Ports in use, derived from the stream's L4 routes (one listener port per route).
-  const portsInUse = routes
-    .filter((r) => typeof r.config?.listenerPort === 'number' && r.config.listenerPort > 0)
-    .map((r) => ({ port: r.config!.listenerPort as number, protocol: (r.protocol || '').toUpperCase(), route: r.name }))
-    .sort((a, b) => a.port - b.port);
 
   if (isLoading) {
     return (
@@ -148,7 +133,7 @@ export default function StreamDetailPage() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">{stream.name}</h1>
-            {getStatusBadge(stream.status)}
+            {statusBadge(stream.status)}
           </div>
           <p className="text-gray-600 mt-1">
             Namespace: {stream.namespace}
@@ -185,105 +170,92 @@ export default function StreamDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <Card>
-          <CardContent className="py-4">
-            <h3 className="text-sm font-medium text-gray-500 mb-2">Load Balancer Address</h3>
-            {stream.loadBalancerAddress ? (
-              <p className="font-mono text-gray-900">{stream.loadBalancerAddress}</p>
-            ) : (
-              <p className="text-sm text-gray-400">Not available yet</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <h3 className="text-sm font-medium text-gray-500 mb-2">Ports in use</h3>
-            {portsInUse.length === 0 ? (
-              <p className="text-sm text-gray-400">No ports in use</p>
-            ) : (
-              <ul className="space-y-1" data-testid="ports-in-use">
-                {portsInUse.map((p) => (
-                  <li key={`${p.protocol}-${p.port}-${p.route}`} className="text-sm text-gray-900">
-                    <span className="font-mono">{p.port}</span>
-                    <span className="text-gray-500"> / {p.protocol}</span>
-                    <span className="text-gray-500"> — {p.route}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
       <div className="mb-6">
-        <L4MetricsCard projectId={projectId} streamId={streamId} />
+        <StreamEntrypointPanel projectId={projectId} streamId={streamId} refreshKey={refreshKey} />
       </div>
 
       <Card>
         <CardContent className="pt-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Routes
-              {routes.length > 0 && <Badge variant="default" className="ml-2 text-xs">{routes.length}</Badge>}
-            </h2>
-            {permissions?.canCreateRoutes && (
-              <Link href={`/projects/${projectId}/streams/${streamId}/routes/create`}>
-                <Button size="sm">
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add route
-                </Button>
-              </Link>
-            )}
-          </div>
-          {routeActionError && <p className="mb-3 text-sm text-red-700">{routeActionError}</p>}
-          {routes.length === 0 ? (
-            <p className="text-sm text-gray-500">No routes yet.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 text-left text-gray-500">
-                  <th className="py-2 pr-4 font-medium">Name</th>
-                  <th className="py-2 pr-4 font-medium">Protocol</th>
-                  <th className="py-2 pr-4 font-medium">Port</th>
-                  <th className="py-2 pr-4 font-medium">Status</th>
-                  <th className="py-2 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {routes.map((route) => (
-                  <tr key={route.id} className="border-b border-gray-100 last:border-0">
-                    <td className="py-2 pr-4 font-medium text-gray-900">{route.name}</td>
-                    <td className="py-2 pr-4 text-gray-600">{(route.protocol || '').toUpperCase()}</td>
-                    <td className="py-2 pr-4 text-gray-600 font-mono">{route.config?.listenerPort ?? '—'}</td>
-                    <td className="py-2 pr-4">{getStatusBadge(route.status)}</td>
-                    <td className="py-2">
-                      <div className="flex items-center justify-end gap-2">
-                        {permissions?.canCreateRoutes && (
-                          <Link href={`/projects/${projectId}/streams/${streamId}/routes/${route.id}/edit`}>
-                            <Button size="sm" variant="secondary" aria-label={`Edit ${route.name}`}>
-                              <Pencil className="h-4 w-4 mr-1" />
-                              Edit
-                            </Button>
-                          </Link>
-                        )}
-                        {canDeployRoute(route) && (
-                          <Button
-                            size="sm"
-                            onClick={() => handleDeployRoute(route.id)}
-                            disabled={deployingRouteId === route.id}
+          <Tabs defaultValue="routes">
+            <TabsList>
+              <TabsTrigger value="routes">
+                Routes
+                {routes.length > 0 && <Badge variant="default" className="ml-2 text-xs">{routes.length}</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="metrics">Metrics</TabsTrigger>
+              <TabsTrigger value="manifests">Manifests</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="routes">
+              {permissions?.canCreateRoutes && (
+                <div className="flex justify-end mb-4">
+                  <Link href={`/projects/${projectId}/streams/${streamId}/routes/create`}>
+                    <Button size="sm">
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add route
+                    </Button>
+                  </Link>
+                </div>
+              )}
+              {routeActionError && <p className="mb-3 text-sm text-red-700">{routeActionError}</p>}
+              {routes.length === 0 ? (
+                <p className="text-sm text-gray-500">No routes yet.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-left text-gray-500">
+                      <th className="py-2 pr-4 font-medium">Name</th>
+                      <th className="py-2 pr-4 font-medium">Protocol</th>
+                      <th className="py-2 pr-4 font-medium">Port</th>
+                      <th className="py-2 pr-4 font-medium">Owner team</th>
+                      <th className="py-2 pr-4 font-medium">Status</th>
+                      <th className="py-2 font-medium text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {routes.map((route) => (
+                      <tr key={route.id} className="border-b border-gray-100 last:border-0">
+                        <td className="py-2 pr-4">
+                          <Link
+                            href={`/projects/${projectId}/streams/${streamId}/routes/${route.id}`}
+                            className="font-medium text-gray-900 hover:text-primary-600"
                           >
-                            <Rocket className="h-4 w-4 mr-1" />
-                            {deployingRouteId === route.id ? 'Deploying...' : 'Deploy'}
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                            {route.name}
+                          </Link>
+                        </td>
+                        <td className="py-2 pr-4 text-gray-600">{(route.protocol || '').toUpperCase()}</td>
+                        <td className="py-2 pr-4 text-gray-600 font-mono">{route.config?.listenerPort ?? '—'}</td>
+                        <td className="py-2 pr-4 text-gray-600">{route.team?.name || '—'}</td>
+                        <td className="py-2 pr-4">{statusBadge(route.status)}</td>
+                        <td className="py-2">
+                          <div className="flex items-center justify-end gap-2">
+                            {canDeployRoute(route) && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleDeployRoute(route.id)}
+                                disabled={deployingRouteId === route.id}
+                              >
+                                <Rocket className="h-4 w-4 mr-1" />
+                                {deployingRouteId === route.id ? 'Deploying...' : 'Deploy'}
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </TabsContent>
+
+            <TabsContent value="metrics">
+              <L4MetricsCard projectId={projectId} streamId={streamId} />
+            </TabsContent>
+
+            <TabsContent value="manifests">
+              <StreamManifests projectId={projectId} streamId={streamId} />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
 
