@@ -42,3 +42,32 @@ test('stream route methods hit the stream-scoped endpoints', async () => {
   expect(apiClient.delete).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1');
   expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1/deploy');
 });
+
+test('entrypoint, manifest and preview methods hit the stream-scoped endpoints', async () => {
+  (apiClient.get as jest.Mock).mockResolvedValue({ data: {} });
+  (apiClient.post as jest.Mock).mockResolvedValue({ data: {} });
+  const body = { name: 'db', teamId: 't1', config: { matches: [], backends: [], listenerPort: 5432 } };
+  await streamsApi.getEntrypoint('p1', 's1');
+  await streamsApi.getYamls('p1', 's1');
+  await streamsApi.getRouteYamls('p1', 's1', 'r1');
+  await streamsApi.previewCreateRoute('p1', 's1', body);
+  await streamsApi.previewUpdateRoute('p1', 's1', 'r1', { config: body.config });
+  await streamsApi.previewDeleteRoute('p1', 's1', 'r1');
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/streams/s1/entrypoint');
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/streams/s1/yamls');
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1/yamls');
+  expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/preview', body);
+  expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1/preview', { config: body.config });
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1/preview-delete');
+});
+
+test('version methods hit the stream-scoped version endpoints', async () => {
+  (apiClient.get as jest.Mock).mockResolvedValue({ data: { data: [], total: 0 } });
+  (apiClient.post as jest.Mock).mockResolvedValue({ data: {} });
+  await streamsApi.listRouteVersions('p1', 's1', 'r1');
+  await streamsApi.getRouteVersion('p1', 's1', 'r1', 3);
+  await streamsApi.rollbackRouteVersion('p1', 's1', 'r1', 3);
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1/versions', { params: { page: 1, limit: 20 } });
+  expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1/versions/3');
+  expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1/versions/3/rollback');
+});

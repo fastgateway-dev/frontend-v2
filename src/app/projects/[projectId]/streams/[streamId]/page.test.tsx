@@ -13,22 +13,57 @@ jest.mock('@/lib/api', () => ({
     }),
     listRoutes: jest.fn().mockResolvedValue({
       data: [
-        { id: 'r1', name: 'db', protocol: 'tcp', status: 'active', config: { listenerPort: 5432 } },
-        { id: 'r2', name: 'dns', protocol: 'udp', status: 'active', config: { listenerPort: 53 } },
+        { id: 'r1', name: 'db', protocol: 'tcp', status: 'active', config: { listenerPort: 5432 }, team: { id: 't1', name: 'Team A' } },
+        { id: 'r2', name: 'dns', protocol: 'udp', status: 'approved', config: { listenerPort: 53 } },
       ],
     }),
     delete: jest.fn(),
+    deployRoute: jest.fn().mockResolvedValue({}),
+    getEntrypoint: jest.fn().mockResolvedValue({
+      mode: 'dedicated', templateId: 't1', templateName: 'edge-l4', gatewayClass: 'gc', address: '10.0.0.9',
+      portRange: { min: 1, max: 65535 }, sharedWith: { streams: [], domains: [] }, ports: [], reserved: [],
+    }),
+    getYamls: jest.fn().mockResolvedValue({ gatewayYaml: 'kind: Gateway', routes: [] }),
     getMetrics: jest.fn().mockRejectedValue({ response: { status: 400, data: { error: 'not configured' } } }),
   },
-  permissionsApi: { getProjectPermissions: jest.fn().mockResolvedValue({ canManageDomains: true }) },
+  permissionsApi: {
+    getProjectPermissions: jest.fn().mockResolvedValue({ canManageDomains: true, canCreateRoutes: true }),
+  },
 }));
 import { streamsApi } from '@/lib/api';
 
-test('shows in-use ports derived from routes', async () => {
+beforeEach(() => jest.clearAllMocks());
+
+test('replaces the LB address and ports cards with the Entry point panel', async () => {
   render(<StreamDetailPage />);
-  const list = await screen.findByTestId('ports-in-use');
-  expect(list).toHaveTextContent('53');
-  expect(list).toHaveTextContent('5432');
+  await waitFor(() => expect(screen.getByTestId('entrypoint-panel')).toHaveTextContent('Dedicated IP'));
+  expect(screen.getByTestId('entrypoint-panel')).toHaveTextContent('10.0.0.9');
+  expect(streamsApi.getEntrypoint).toHaveBeenCalledWith('p1', 's1');
+  expect(screen.queryByText('Load Balancer Address')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('ports-in-use')).not.toBeInTheDocument();
+});
+
+test('Routes tab links each route to its detail page, shows the owner team and keeps quick Deploy', async () => {
+  render(<StreamDetailPage />);
+  const link = await screen.findByRole('link', { name: 'db' });
+  expect(link).toHaveAttribute('href', '/projects/p1/streams/s1/routes/r1');
+  expect(screen.getByText('Team A')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+  await waitFor(() => expect(streamsApi.deployRoute).toHaveBeenCalledWith('p1', 's1', 'r2'));
+  await waitFor(() => expect(streamsApi.getEntrypoint).toHaveBeenCalledTimes(2));
+});
+
+test('Metrics and Manifests are tabs that load on open', async () => {
+  render(<StreamDetailPage />);
+  await screen.findByRole('link', { name: 'db' });
+  expect(streamsApi.getYamls).not.toHaveBeenCalled();
+  expect(streamsApi.getMetrics).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Manifests' }));
+  expect(await screen.findByText('kind: Gateway')).toBeInTheDocument();
+  expect(streamsApi.getYamls).toHaveBeenCalledWith('p1', 's1');
+  fireEvent.click(screen.getByRole('tab', { name: 'Metrics' }));
+  await waitFor(() => expect(streamsApi.getMetrics).toHaveBeenCalled());
 });
 
 test('surfaces the 409 remove-routes-first error on delete', async () => {

@@ -288,7 +288,7 @@ export interface CreateDomainInput {
   dns?: { enabled: boolean; hostedZoneId?: string; recordType?: DNSRecordType; ttl?: number; proxied?: boolean };
 }
 
-// L4 Streams (TCP/UDP). A Stream owns a dedicated Gateway; L4 routes attach to it.
+// L4 Streams (TCP/UDP). A Stream is an L4 entry point; each route is a port on it.
 export type StreamStatus = 'pending' | 'active' | 'error';
 
 export interface Stream {
@@ -305,6 +305,14 @@ export interface Stream {
   loadBalancerAddress?: string;
   createdAt?: string;
   updatedAt?: string;
+  // List-only enrichment (GET /projects/:projectId/streams). Absent on GET /streams/:id.
+  /** `shared` iff the stream's template has mergeGateways. */
+  mode?: EntrypointMode;
+  gatewayTemplateName?: string;
+  /** Non-rejected L4 routes on the stream. */
+  routeCount?: number;
+  /** (transport, port) of the stream's non-rejected L4 routes. */
+  ports?: TransportPort[];
 }
 
 export interface CreateStreamInput {
@@ -325,6 +333,112 @@ export interface StreamRoute {
   protocol: 'tcp' | 'udp' | string;
   status: string;
   config?: { listenerPort?: number };
+  /** Owner team (the stream route list preloads Team). */
+  teamId?: string;
+  team?: { id: string; name: string };
+}
+
+/** Entry point mode of a Stream: template mergeGateways false -> dedicated, true -> shared. */
+export type EntrypointMode = 'dedicated' | 'shared';
+
+/** A Gateway listener identity. Transport is "TCP" or "UDP". */
+export interface TransportPort {
+  transport: 'TCP' | 'UDP' | string;
+  port: number;
+}
+
+export interface EntrypointPortOwner {
+  kind: 'stream_route' | 'domain';
+  streamId?: string;
+  streamName?: string;
+  routeId?: string;
+  routeName?: string;
+  status?: string;
+  domainId?: string;
+  domainName?: string;
+}
+
+export interface EntrypointPort extends TransportPort {
+  owner: EntrypointPortOwner;
+}
+
+export type ReservedPortReason = 'envoy_internal' | 'placeholder' | 'template_listener';
+
+export interface ReservedPort extends TransportPort {
+  reason: ReservedPortReason;
+}
+
+export interface PortRange {
+  min: number;
+  max: number;
+}
+
+/** GET /streams/:streamId/entrypoint and GET /domain-templates/:domainTemplateId/entrypoint. */
+export interface StreamEntrypoint {
+  mode: EntrypointMode;
+  templateId: string;
+  templateName: string;
+  gatewayClass: string;
+  /** "" = not assigned yet. */
+  address: string;
+  portRange: PortRange | null;
+  sharedWith: {
+    streams: Array<{ id: string; name: string }>;
+    domains: Array<{ id: string; name: string; hostname: string }>;
+  };
+  ports: EntrypointPort[];
+  reserved: ReservedPort[];
+}
+
+/** One live L4 route in GET /streams/:streamId/yamls. */
+export interface StreamRouteYAML {
+  routeId: string;
+  name: string;
+  protocol: 'tcp' | 'udp' | string;
+  routeYaml: string;
+  /** Empty or absent when the route has no BackendTrafficPolicy. */
+  backendTrafficPolicyYaml?: string;
+}
+
+export interface StreamYAMLs {
+  gatewayYaml: string;
+  routes: StreamRouteYAML[];
+}
+
+/** GET .../routes/:routeId/yamls. For an L4 route httpRouteYaml carries the TCPRoute/UDPRoute. */
+export interface RouteYAMLs {
+  httpRouteYaml: string;
+  securityPolicyYaml?: string;
+  backendTrafficPolicyYaml?: string;
+  envoyExtensionPolicyYaml?: string;
+  backendYaml?: string;
+  httpRouteFilterYaml?: string;
+  configMapYaml?: string;
+}
+
+/** POST /streams/:streamId/routes/preview. */
+export interface L4PreviewCreateResult {
+  proposedYaml: string;
+  proposedBackendTrafficPolicyYaml?: string;
+}
+
+/** POST /streams/:streamId/routes/:routeId/preview. */
+export interface L4PreviewUpdateResult {
+  currentYaml: string;
+  proposedYaml: string;
+  currentBackendTrafficPolicyYaml?: string;
+  proposedBackendTrafficPolicyYaml?: string;
+}
+
+/** GET .../routes/:routeId/preview-delete (same shape as routesApi.previewDelete). */
+export interface PreviewDeleteResult {
+  currentYaml: string;
+  currentSecurityPolicyYaml?: string;
+  currentBackendTrafficPolicyYaml?: string;
+  currentEnvoyExtensionPolicyYaml?: string;
+  currentBackendYaml?: string;
+  currentHttpRouteFilterYaml?: string;
+  currentConfigMapYaml?: string;
 }
 
 /** Per-listener L4 (TCP/UDP) metrics. L4 has no latency/error/RPS series. */
@@ -1425,9 +1539,33 @@ export interface ApprovalRequest {
   rejectionComment?: string;
   entityName?: string;
   domainName?: string;
+  /** Set for L4 (stream) routes instead of domainName. */
+  streamId?: string;
+  streamName?: string;
   stages?: ApprovalStage[];
   createdAt: string;
   reviewedAt?: string;
+}
+
+export type RouteKind = 'HTTPRoute' | 'GRPCRoute' | 'TCPRoute' | 'UDPRoute';
+
+/** GET /approvals/:approvalId/diff. */
+export interface ApprovalDiff {
+  action: string;
+  /** Kind of the route manifest in currentYaml/proposedYaml; absent from older backends (= HTTPRoute). */
+  routeKind?: RouteKind;
+  currentYaml?: string;
+  proposedYaml?: string;
+  currentSecurityPolicyYaml?: string;
+  proposedSecurityPolicyYaml?: string;
+  currentBackendTrafficPolicyYaml?: string;
+  proposedBackendTrafficPolicyYaml?: string;
+  currentEnvoyExtensionPolicyYaml?: string;
+  proposedEnvoyExtensionPolicyYaml?: string;
+  currentBackendYaml?: string;
+  proposedBackendYaml?: string;
+  changeDescription?: string;
+  aiReview?: AIReviewResult;
 }
 
 // Client types
