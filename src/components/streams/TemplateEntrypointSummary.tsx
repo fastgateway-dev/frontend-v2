@@ -1,52 +1,19 @@
-'use client';
-
 // Stream-create "Entry point" panel: what a new stream on the selected template
-// lands on. Read-only; the server's create 400/409 stays authoritative.
+// lands on. Read-only; the server's create 400/409 stays authoritative. The page
+// owns the fetch so the port picker can share the same entry point.
 
-import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui';
-import { domainTemplatesApi } from '@/lib/api';
 import type { StreamEntrypoint } from '@/types';
-import {
-  entrypointLabel,
-  freePortCount,
-  rangeSize,
-  sharedWithSummary,
-  withDefaultReserved,
-} from '@/lib/utils/stream-entrypoint';
+import { entrypointLabel, freePortCount, rangeSize, withDefaultReserved } from '@/lib/utils/stream-entrypoint';
 
 interface Props {
-  projectId: string;
-  templateId: string;
+  /** null while loading (or when the load failed, see `error`). */
+  entrypoint: StreamEntrypoint | null;
+  error: string | null;
 }
 
-export function TemplateEntrypointSummary({ projectId, templateId }: Props) {
-  const [entrypoint, setEntrypoint] = useState<StreamEntrypoint | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showShared, setShowShared] = useState(false);
-
-  useEffect(() => {
-    // The cleanup flag drops a late response for a template the user already left.
-    let cancelled = false;
-    setEntrypoint(null);
-    setError(null);
-    setShowShared(false);
-    domainTemplatesApi
-      .getEntrypoint(projectId, templateId)
-      .then((data) => {
-        if (!cancelled) setEntrypoint(data);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        const err = e as { response?: { data?: { error?: string } } };
-        setError(err.response?.data?.error || 'request failed');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, templateId]);
-
+export function TemplateEntrypointSummary({ entrypoint, error }: Props) {
   const box = 'p-4 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 space-y-2';
 
   if (error) {
@@ -72,11 +39,10 @@ export function TemplateEntrypointSummary({ projectId, templateId }: Props) {
     );
   }
 
-  const { mode, portRange, sharedWith } = entrypoint;
+  const { mode, portRange } = entrypoint;
   const label = entrypointLabel(mode);
   const rangeText = portRange ? `${portRange.min}–${portRange.max}` : null;
   const free = freePortCount(portRange, entrypoint.ports, withDefaultReserved(entrypoint.reserved));
-  const othersCount = sharedWith.streams.length + sharedWith.domains.length;
 
   return (
     <div data-testid="entrypoint-summary" className={box}>
@@ -92,34 +58,11 @@ export function TemplateEntrypointSummary({ projectId, templateId }: Props) {
       ) : (
         <p>
           This stream joins the shared entry point <code className="font-mono">{entrypoint.gatewayClass}</code> (IP{' '}
-          {entrypoint.address || 'assigned on first deploy'}), also used by {sharedWithSummary(sharedWith)}.
+          {entrypoint.address || 'assigned on first deploy'}).
           {portRange && free != null
             ? ` ${free} of ${rangeSize(portRange)} ports free in ${rangeText}.`
             : ' This template has no TCP/UDP port range.'}
         </p>
-      )}
-      {mode === 'shared' && othersCount > 0 && (
-        <div>
-          <button
-            type="button"
-            className="text-primary-600 hover:underline"
-            onClick={() => setShowShared((v) => !v)}
-          >
-            {showShared ? 'Hide who shares it' : 'Show who shares it'}
-          </button>
-          {showShared && (
-            <ul className="mt-1 list-disc pl-5" data-testid="shared-with-list">
-              {sharedWith.streams.map((s) => (
-                <li key={`s-${s.id}`}>Stream {s.name}</li>
-              ))}
-              {sharedWith.domains.map((d) => (
-                <li key={`d-${d.id}`}>
-                  Domain {d.name} ({d.hostname})
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       )}
     </div>
   );
