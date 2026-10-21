@@ -62,9 +62,9 @@ export function rangeSize(range: PortRange): number {
 
 /**
  * Port numbers in [min, max] that no listed port and no reservation holds, on any
- * transport. Conservative on purpose: reservations are transport-agnostic on the
- * backend, and a number used on one transport is counted as taken, so the UI
- * never calls a port free that create would reject. Null when there is no range.
+ * transport. Conservative on purpose: a number used or reserved on one transport
+ * is counted as taken, so the UI never calls a port free that create would reject.
+ * Null when there is no range.
  */
 export function freePortCount(
   range: PortRange | null,
@@ -154,8 +154,9 @@ function takenBy(claim: TransportPort, ctx: ClaimContext): EntrypointPort | unde
 
 /**
  * Why a claim can't be added to `current`, or null when it can. Checks in the
- * order the user should fix them: bounds, reservations (transport-agnostic, like
- * the backend), the template's range, the set itself, then other owners.
+ * order the user should fix them: bounds, reservations (per transport: a template's
+ * hostname-routed ports are reserved for TCP only, Envoy's internal ports on both,
+ * like the backend), the template's range, the set itself, then other owners.
  */
 export function claimProblem(
   claim: TransportPort,
@@ -163,7 +164,7 @@ export function claimProblem(
   ctx: ClaimContext
 ): ClaimProblem | null {
   if (!Number.isInteger(claim.port) || claim.port < 1 || claim.port > 65535) return 'invalid';
-  if (ctx.reserved.some((r) => r.port === claim.port)) return 'reserved';
+  if (ctx.reserved.some((r) => sameClaim(r, claim))) return 'reserved';
   if (ctx.range && (claim.port < ctx.range.min || claim.port > ctx.range.max)) return 'out_of_range';
   if (current.some((c) => sameClaim(c, claim))) return 'duplicate';
   if (takenBy(claim, ctx)) return 'taken';

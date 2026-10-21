@@ -171,6 +171,19 @@ describe('claimProblem', () => {
   test("ignores the stream's own claims", () => {
     expect(claimProblem(claim(9000), [], ctx({ taken: [mine(9000)] }))).toBeNull();
   });
+  describe('reservations are per transport', () => {
+    const reserved: ReservedPort[] = [...DEFAULT_RESERVED, { transport: 'TCP', port: 443, reason: 'template_listener' }];
+    const c = () => ctx({ range: null, reserved: withDefaultReserved(reserved) });
+    test('UDP on a template listener TCP port is fine', () => {
+      expect(claimProblem(claim(443, 'UDP'), [], c())).toBeNull();
+    });
+    test('TCP on a template listener port is reserved', () => {
+      expect(claimProblem(claim(443), [], c())).toBe('reserved');
+    });
+    test('an Envoy internal port is reserved on UDP too', () => {
+      expect(claimProblem(claim(19000, 'UDP'), [], c())).toBe('reserved');
+    });
+  });
 });
 
 describe('claimProblemMessage', () => {
