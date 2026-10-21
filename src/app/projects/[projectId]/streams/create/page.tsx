@@ -216,7 +216,6 @@ export default function CreateStreamPage() {
                       reserved={entrypoint?.reserved ?? []}
                       taken={entrypoint?.ports ?? []}
                       error={portsError ?? undefined}
-                      disabled={!entrypoint && !entrypointError}
                     />
                   </div>
                 )}

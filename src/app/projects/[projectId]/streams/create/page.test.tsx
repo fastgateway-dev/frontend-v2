@@ -230,6 +230,21 @@ test('create still works when the entry point fails', async () => {
   );
 });
 
+test('create still works while the entry point request never resolves', async () => {
+  (domainTemplatesApi.getEntrypoint as jest.Mock).mockImplementation(() => new Promise(() => {}));
+  (streamsApi.create as jest.Mock).mockResolvedValue({ id: 's1' });
+  await pick('t1');
+  expect(panel()).toHaveTextContent('Loading entry point');
+  expect(screen.getByLabelText('Port')).toBeEnabled();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'pg' } });
+  claim('5432');
+  expect(screen.getByRole('button', { name: 'Create Stream' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create Stream' }));
+  await waitFor(() =>
+    expect(streamsApi.create).toHaveBeenCalledWith('p1', expect.objectContaining({ ports: [{ transport: 'TCP', port: 5432 }] }))
+  );
+});
+
 // Review Focus: switching templates quickly.
 test('ignores a late entry point response for a template the user already left', async () => {
   let resolveFirst: (v: unknown) => void = () => {};
