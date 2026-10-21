@@ -25,7 +25,15 @@ import {
   TabsContent,
 } from '@/components/ui';
 import { streamsApi, projectTeamsApi, projectNamespacesApi, kubernetesApi, permissionsApi } from '@/lib/api';
-import type { ProjectPermissions, ProjectTeamRole, Stream, StreamRoute, K8sService, LoadBalancerType } from '@/types';
+import type {
+  EntrypointPort,
+  ProjectPermissions,
+  ProjectTeamRole,
+  Stream,
+  StreamRoute,
+  K8sService,
+  LoadBalancerType,
+} from '@/types';
 import { L4ManifestDiff, type L4ManifestPair } from './L4ManifestDiff';
 import {
   L4_FORM_TABS,
@@ -46,7 +54,7 @@ import {
   type L4PolicyForm,
   type L4Protocol,
 } from '@/lib/utils/l4route';
-import { freeClaims, portLabel } from '@/lib/utils/stream-entrypoint';
+import { freeClaims, myClaims, portLabel } from '@/lib/utils/stream-entrypoint';
 
 interface Props {
   projectId: string;
@@ -76,6 +84,8 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const [teams, setTeams] = useState<ProjectTeamRole[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [existingRoutes, setExistingRoutes] = useState<StreamRoute[]>([]);
+  // This stream's rows of the entry point port map; null when it couldn't be loaded.
+  const [entrypointPorts, setEntrypointPorts] = useState<EntrypointPort[] | null>(null);
   const [servicesByNs, setServicesByNs] = useState<Record<string, K8sService[]>>({});
   const requestedNs = useRef<Set<string>>(new Set());
 
@@ -106,11 +116,13 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const caps = policyCapabilities(protocol);
   const transport = protocol === 'udp' ? 'UDP' : 'TCP';
 
-  // The stream's claimed ports on this protocol that no other route uses. The
-  // route being edited doesn't hold its own port, so it stays selectable.
+  // The stream's claimed ports on this protocol that no other route uses: not on
+  // a route row, not held by another route's pending approval or latest deployed
+  // version (the entry point). The route being edited doesn't hold its own port,
+  // so it stays selectable.
   const freePorts = useMemo(
-    () => freeClaims(stream?.ports ?? [], existingRoutes, transport, routeId),
-    [stream, existingRoutes, transport, routeId]
+    () => freeClaims(stream?.ports ?? [], existingRoutes, transport, routeId, entrypointPorts),
+    [stream, existingRoutes, entrypointPorts, transport, routeId]
   );
   // Only a free claim counts as a selection; anything else (a stale value, a
   // legacy route port that isn't claimed) must be re-picked.
@@ -131,7 +143,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   useEffect(() => {
     const load = async () => {
       try {
-        const [streamData, routesData, nsData, teamsData, routeData, permsData] = await Promise.all([
+        const [streamData, routesData, nsData, teamsData, routeData, permsData, entrypointData] = await Promise.all([
           streamsApi.get(projectId, streamId),
           streamsApi.listRoutes(projectId, streamId).catch(() => ({ data: [] as StreamRoute[] })),
           projectNamespacesApi.list(projectId).catch(() => []),
@@ -139,9 +151,16 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
           routeId ? streamsApi.getRoute(projectId, streamId, routeId) : Promise.resolve(null),
           // Best-effort: only decides whether "Claim another port" is a link.
           permissionsApi.getProjectPermissions(projectId).catch(() => null),
+          // Best-effort: adds the claims other routes hold without a route row (pending
+          // approval, latest deployed). Without it the free list uses the route rows alone.
+          streamsApi
+            .getEntrypoint(projectId, streamId)
+            .then((e) => myClaims(e?.ports ?? [], streamId))
+            .catch(() => null),
         ]);
         setStream(streamData);
         setPermissions(permsData);
+        setEntrypointPorts(entrypointData);
         setExistingRoutes(routesData.data || []);
         const nsNames = (nsData || []).filter((n) => n.referenceGrantCreated).map((n) => n.namespace);
         setNamespaces(nsNames);
@@ -182,7 +201,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const onProtocolChange = (p: L4Protocol) => {
     setProtocol(p);
     const t = p === 'udp' ? 'UDP' : 'TCP';
-    const free = freeClaims(stream?.ports ?? [], existingRoutes, t, routeId);
+    const free = freeClaims(stream?.ports ?? [], existingRoutes, t, routeId, entrypointPorts);
     if (parsedPort == null || !free.includes(parsedPort)) setPortInput('');
   };
 
@@ -337,8 +356,16 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
 
   const portError = serverPortError || formErrors.port;
   // A legacy stream with no claims at all reads differently from one whose claims are all taken.
-  const noClaims = (stream.ports ?? []).length === 0;
-  const claimLabel = noClaims ? 'Claim a port on the stream.' : 'Claim another port on the stream.';
+  const claimed = stream.ports ?? [];
+  const noClaims = claimed.length === 0;
+  // No claim of the selected transport at all (even if the other transport has some) vs. all of them used.
+  const noClaimsOnTransport = !noClaims && !claimed.some((c) => c.transport.toUpperCase() === transport);
+  const claimLabel = noClaims || noClaimsOnTransport ? 'Claim a port on the stream.' : 'Claim another port on the stream.';
+  const noFreeText = noClaims
+    ? 'This stream has no ports claimed. '
+    : noClaimsOnTransport
+      ? `This stream has no ${transport} ports claimed. `
+      : `All of this stream's ${transport} ports are in use. `;
   const errorTabs = tabErrors({ ...formErrors, port: portError });
 
   return (
@@ -432,9 +459,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
                     />
                     {freePorts.length === 0 ? (
                       <p data-testid="no-free-ports" className="mt-1 text-sm text-amber-700">
-                        {noClaims
-                          ? 'This stream has no ports claimed. '
-                          : `All of this stream's ${transport} ports are in use. `}
+                        {noFreeText}
                         {permissions?.canManageDomains ? (
                           <Link href={streamUrl} className="underline">
                             {claimLabel}

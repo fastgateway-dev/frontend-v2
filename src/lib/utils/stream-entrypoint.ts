@@ -189,20 +189,33 @@ export function claimProblemMessage(p: ClaimProblem, claim: TransportPort, ctx: 
 }
 
 /**
- * Claimed ports on a transport that no live route uses, ascending. A route
+ * Claimed ports on a transport that no other route uses, ascending. A route
  * being edited (ownRouteId) doesn't hold its own port; rejected routes hold none.
+ *
+ * "Used" is the union of the route rows (their current listener port) and, when
+ * the entry point's port map is given, every claim it attributes to a route: that
+ * adds another route's pending approval and a route's latest deployed port, which
+ * the route rows alone don't show. A bare claim (no route) holds nothing. Pass
+ * null when the entry point couldn't be loaded to use the route rows alone.
  */
 export function freeClaims(
   claims: TransportPort[],
   routes: StreamRoute[],
   transport: 'TCP' | 'UDP',
-  ownRouteId?: string
+  ownRouteId?: string,
+  entrypointPorts?: EntrypointPort[] | null
 ): number[] {
   const used = new Set<number>();
   for (const r of routes) {
     const port = r.config?.listenerPort;
     if (port == null || r.id === ownRouteId || r.status === 'rejected') continue;
     if (r.protocol.toUpperCase() === transport) used.add(port);
+  }
+  for (const p of entrypointPorts ?? []) {
+    const { owner } = p;
+    if (owner.kind !== 'stream' || !(owner.routeId || owner.routeName)) continue;
+    if (owner.routeId === ownRouteId || owner.status === 'rejected') continue;
+    if (p.transport.toUpperCase() === transport) used.add(p.port);
   }
   return claims
     .filter((c) => c.transport.toUpperCase() === transport && !used.has(c.port))

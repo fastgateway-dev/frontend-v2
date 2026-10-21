@@ -234,4 +234,41 @@ describe('freeClaims', () => {
   test('a rejected route does not hold its port', () => {
     expect(freeClaims(claims, [route('r1', 5432, 'tcp', 'rejected')], 'TCP')).toEqual([5432, 5433]);
   });
+
+  describe('with the entry point port map', () => {
+    const owned = (
+      port: number,
+      routeId: string | undefined,
+      extra: Partial<EntrypointPort['owner']> = {},
+      transport = 'TCP'
+    ): EntrypointPort => ({
+      transport,
+      port,
+      owner: { kind: 'stream', streamId: 's1', ...(routeId ? { routeId, routeName: routeId } : {}), ...extra },
+    });
+    test("another route's pending update holds the new port", () => {
+      const ep = [owned(5432, 'r1'), owned(5433, 'r1', { pending: true })];
+      expect(freeClaims(claims, [route('r1', 5432)], 'TCP', undefined, ep)).toEqual([]);
+    });
+    test('a route approved but not deployed still holds its deployed port', () => {
+      const ep = [owned(5432, 'r1', { status: 'pending_deploy' })];
+      expect(freeClaims(claims, [route('r1', 5433)], 'TCP', undefined, ep)).toEqual([]);
+    });
+    test('the route being edited holds nothing, whatever the entry point says', () => {
+      const ep = [owned(5432, 'r1'), owned(5433, 'r1', { pending: true })];
+      expect(freeClaims(claims, [route('r1', 5432)], 'TCP', 'r1', ep)).toEqual([5432, 5433]);
+    });
+    test('a bare claim (no route) and other transports hold nothing', () => {
+      const ep = [owned(5432, undefined), owned(53, 'r2', {}, 'TCP')];
+      expect(freeClaims(claims, [], 'TCP', undefined, ep)).toEqual([5432, 5433]);
+      expect(freeClaims(claims, [], 'UDP', undefined, ep)).toEqual([53]);
+    });
+    test('a rejected owner holds nothing', () => {
+      const ep = [owned(5433, 'r2', { status: 'rejected' })];
+      expect(freeClaims(claims, [], 'TCP', undefined, ep)).toEqual([5432, 5433]);
+    });
+    test('null (entry point unavailable) falls back to the route rows', () => {
+      expect(freeClaims(claims, [route('r1', 5432)], 'TCP', undefined, null)).toEqual([5433]);
+    });
+  });
 });
