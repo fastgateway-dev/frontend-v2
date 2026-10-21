@@ -26,7 +26,9 @@ export function StreamManifests({ projectId, streamId, refreshKey = 0 }: Props) 
     streamsApi
       .getYamls(projectId, streamId)
       .then((d) => {
-        if (!cancelled) setData(d);
+        if (cancelled) return;
+        setData(d);
+        setError(null);
       })
       .catch((e: unknown) => {
         if (cancelled) return;

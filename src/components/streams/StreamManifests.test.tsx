@@ -52,3 +52,14 @@ test('shows the load error', async () => {
   render(<StreamManifests projectId="p1" streamId="s1" />);
   expect(await screen.findByRole('alert')).toHaveTextContent('boom');
 });
+
+test('a transient load error clears when a refetch succeeds', async () => {
+  (streamsApi.getYamls as jest.Mock)
+    .mockRejectedValueOnce({ response: { data: { error: 'boom' } } })
+    .mockResolvedValueOnce({ gatewayYaml: 'kind: Gateway', routes: [] });
+  const { rerender } = render(<StreamManifests projectId="p1" streamId="s1" refreshKey={0} />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('boom');
+  rerender(<StreamManifests projectId="p1" streamId="s1" refreshKey={1} />);
+  expect(await screen.findByText(/kind: Gateway/)).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});

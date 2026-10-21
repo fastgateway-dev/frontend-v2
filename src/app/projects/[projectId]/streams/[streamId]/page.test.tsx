@@ -115,3 +115,28 @@ test('saving ports refreshes the entry point panel and the Manifests tab', async
   await waitFor(() => expect(streamsApi.getYamls).toHaveBeenCalledTimes(2));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
 });
+
+test('Edit ports still works when the entry point fails to load', async () => {
+  (streamsApi.getEntrypoint as jest.Mock).mockRejectedValue({ response: { status: 500, data: { error: 'template lookup failed' } } });
+  (streamsApi.update as jest.Mock).mockResolvedValue({
+    id: 's1', projectId: 'p1', name: 'pg', namespace: 'ns', status: 'active',
+    ports: [{ transport: 'TCP', port: 5432 }, { transport: 'UDP', port: 53 }],
+  });
+  render(<StreamDetailPage />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('template lookup failed');
+  const button = screen.getByRole('button', { name: 'Edit ports' });
+  expect(button).toBeEnabled();
+  fireEvent.click(button);
+  // Seeded from stream.ports even though there is no entry point to lock or validate against.
+  expect(screen.getAllByTestId('port-claim-chip')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Remove 5432/TCP' })).toBeEnabled();
+  fireEvent.click(screen.getByLabelText('UDP'));
+  fireEvent.change(screen.getByLabelText('Port'), { target: { value: '53' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() =>
+    expect(streamsApi.update).toHaveBeenCalledWith('p1', 's1', {
+      ports: [{ transport: 'UDP', port: 53 }, { transport: 'TCP', port: 5432 }],
+    })
+  );
+});

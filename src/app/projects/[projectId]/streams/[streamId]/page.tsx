@@ -13,6 +13,20 @@ import { EditStreamPortsModal } from '@/components/streams/EditStreamPortsModal'
 import { l4StatusBadge } from '@/lib/utils/l4route';
 import type { Stream, StreamEntrypoint, StreamRoute, ProjectPermissions } from '@/types';
 
+// Used when the entry point could not be loaded: claims can still be edited, with
+// no lock info or range hints; the server's 400/409 stays authoritative.
+const NO_ENTRYPOINT: StreamEntrypoint = {
+  mode: 'dedicated',
+  templateId: '',
+  templateName: '',
+  gatewayClass: '',
+  address: '',
+  portRange: null,
+  sharedWith: { streams: [], domains: [] },
+  ports: [],
+  reserved: [],
+};
+
 export default function StreamDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -152,7 +166,7 @@ export default function StreamDetailPage() {
         </div>
         {permissions?.canManageDomains && (
           <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={() => setShowEditPorts(true)} disabled={!entrypoint}>
+            <Button variant="secondary" onClick={() => setShowEditPorts(true)}>
               <Pencil className="h-4 w-4 mr-2" />
               Edit ports
             </Button>
@@ -274,16 +288,14 @@ export default function StreamDetailPage() {
         </CardContent>
       </Card>
 
-      {entrypoint && (
-        <EditStreamPortsModal
-          projectId={projectId}
-          stream={stream}
-          entrypoint={entrypoint}
-          open={showEditPorts}
-          onClose={() => setShowEditPorts(false)}
-          onSaved={handlePortsSaved}
-        />
-      )}
+      <EditStreamPortsModal
+        projectId={projectId}
+        stream={stream}
+        entrypoint={entrypoint ?? NO_ENTRYPOINT}
+        open={showEditPorts}
+        onClose={() => setShowEditPorts(false)}
+        onSaved={handlePortsSaved}
+      />
 
       <Modal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Delete Stream">
         <div className="space-y-4">
