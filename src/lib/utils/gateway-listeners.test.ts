@@ -18,7 +18,16 @@ const udp: TemplateListener = { name: 'udp', protocol: 'UDP', portRangeMin: 9200
 
 describe('RESERVED_PORTS', () => {
   test('lists the backend reserved ports', () => {
-    expect(RESERVED_PORTS).toEqual([19000, 19001, 60000]);
+    expect(RESERVED_PORTS).toEqual([19000, 19001]);
+  });
+});
+
+describe('60000 is a normal listener port', () => {
+  test('a template listener on 60000 is accepted', () => {
+    expect(listenerPortConflict([{ name: 'edge', protocol: 'TLS', port: 60000, tlsMode: 'Passthrough' }])).toBeNull();
+  });
+  test('19000 is still rejected', () => {
+    expect(listenerPortConflict([{ name: 'edge', protocol: 'TLS', port: 19000, tlsMode: 'Passthrough' }])).toMatch(/reserved/);
   });
 });
 

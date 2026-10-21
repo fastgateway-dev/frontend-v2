@@ -133,7 +133,6 @@ export function reservedSummary(reserved: ReservedPort[]): string[] {
 
 const REASON_LABELS: Record<ReservedPortReason, string> = {
   envoy_internal: 'Envoy internal',
-  placeholder: 'Placeholder listener',
   template_listener: 'Template listener',
 };
 

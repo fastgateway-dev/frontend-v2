@@ -4,7 +4,7 @@
 // so they can be unit-tested directly.
 import type { TemplateListener } from '@/types';
 
-export const RESERVED_PORTS = [19000, 19001, 60000];
+export const RESERVED_PORTS = [19000, 19001];
 
 const isStream = (l: TemplateListener): boolean => l.protocol === 'TCP' || l.protocol === 'UDP';
 

@@ -368,7 +368,7 @@ export interface EntrypointPort extends TransportPort {
   owner: EntrypointPortOwner;
 }
 
-export type ReservedPortReason = 'envoy_internal' | 'placeholder' | 'template_listener';
+export type ReservedPortReason = 'envoy_internal' | 'template_listener';
 
 export interface ReservedPort extends TransportPort {
   reason: ReservedPortReason;

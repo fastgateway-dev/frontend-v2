@@ -26,7 +26,6 @@ import { streamsApi, domainTemplatesApi } from '@/lib/api';
 const RESERVED = [
   { transport: 'TCP', port: 19000, reason: 'envoy_internal' },
   { transport: 'TCP', port: 19001, reason: 'envoy_internal' },
-  { transport: 'TCP', port: 60000, reason: 'placeholder' },
 ];
 const DEDICATED = {
   mode: 'dedicated',
