@@ -11,7 +11,7 @@ const RESERVED = [
 ];
 const MINE = {
   transport: 'TCP', port: 9000,
-  owner: { kind: 'stream_route', streamId: 's1', streamName: 'test-stream', routeId: 'r1', routeName: 'postgres', status: 'active' },
+  owner: { kind: 'stream', streamId: 's1', streamName: 'test-stream', routeId: 'r1', routeName: 'postgres', status: 'active' },
 };
 const SHARED = {
   mode: 'shared',
@@ -23,7 +23,7 @@ const SHARED = {
   sharedWith: { streams: [{ id: 's2', name: 'cache' }], domains: [{ id: 'd1', name: 'api', hostname: 'api.example.com' }] },
   ports: [
     MINE,
-    { transport: 'TCP', port: 9001, owner: { kind: 'stream_route', streamId: 's2', streamName: 'cache', routeId: 'r2', routeName: 'redis', status: 'active' } },
+    { transport: 'TCP', port: 9001, owner: { kind: 'stream', streamId: 's2', streamName: 'cache', routeId: 'r2', routeName: 'redis', status: 'active' } },
     { transport: 'TCP', port: 443, owner: { kind: 'domain', domainId: 'd1', domainName: 'api' } },
   ],
   reserved: [...RESERVED, { transport: 'TCP', port: 443, reason: 'template_listener' }],
@@ -63,7 +63,7 @@ test('shared: IP, who shares it, my ports in full and neighbours collapsed', asy
   expect(screen.getByRole('link', { name: 'cache' })).toHaveAttribute('href', '/projects/p1/streams/s2');
   expect(screen.getByRole('link', { name: 'api' })).toHaveAttribute('href', '/projects/p1/domains/d1');
   expect(screen.getByTestId('reserved-ports')).toHaveTextContent(
-    '443/TCP (Template listener), 19000/TCP+UDP (Envoy internal), 19001/TCP+UDP (Envoy internal), 60000/TCP+UDP (Placeholder listener)'
+    '443/TCP (Template listener), 19000/TCP+UDP (Envoy internal), 19001/TCP+UDP (Envoy internal)'
   );
   expect(screen.getByTestId('port-range')).toHaveTextContent('Port range 9000–9100 · 99 of 101 free');
 });
@@ -94,7 +94,7 @@ test('reserved platform ports are shown even if the response omits them', async 
   renderPanel();
   await screen.findByText('Dedicated IP');
   expect(screen.getByTestId('reserved-ports')).toHaveTextContent(
-    '19000/TCP+UDP (Envoy internal), 19001/TCP+UDP (Envoy internal), 60000/TCP+UDP (Placeholder listener)'
+    '19000/TCP+UDP (Envoy internal), 19001/TCP+UDP (Envoy internal)'
   );
 });
 

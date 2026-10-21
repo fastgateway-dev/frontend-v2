@@ -71,6 +71,7 @@ export default function CreateStreamPage() {
         name: name.trim(),
         namespace,
         gatewayTemplateId: selectedTemplateId,
+        ports: [], // TODO(task 3): the create form's port-claim picker supplies these.
       });
       router.push(`/projects/${projectId}/streams`);
     } catch (error: unknown) {

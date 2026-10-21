@@ -9,9 +9,14 @@ test('list GETs the project streams', async () => {
   expect(apiClient.get).toHaveBeenCalledWith('/projects/p1/streams');
 });
 
-test('create POSTs name, namespace and template', async () => {
+test('create POSTs name, namespace, template and port claims', async () => {
   (apiClient.post as jest.Mock).mockResolvedValue({ data: { id: 's1' } });
-  const input = { name: 'pg', namespace: 'ns', gatewayTemplateId: 't1' };
+  const input = {
+    name: 'pg',
+    namespace: 'ns',
+    gatewayTemplateId: 't1',
+    ports: [{ transport: 'TCP' as const, port: 5432 }],
+  };
   await streamsApi.create('p1', input);
   expect(apiClient.post).toHaveBeenCalledWith('/projects/p1/streams', input);
 });
@@ -19,9 +24,12 @@ test('create POSTs name, namespace and template', async () => {
 test('update PATCHes and delete DELETEs', async () => {
   (apiClient.patch as jest.Mock).mockResolvedValue({ data: { id: 's1' } });
   (apiClient.delete as jest.Mock).mockResolvedValue({});
-  await streamsApi.update('p1', 's1', { name: 'new' });
+  await streamsApi.update('p1', 's1', { name: 'new', ports: [{ transport: 'UDP', port: 53 }] });
   await streamsApi.delete('p1', 's1');
-  expect(apiClient.patch).toHaveBeenCalledWith('/projects/p1/streams/s1', { name: 'new' });
+  expect(apiClient.patch).toHaveBeenCalledWith('/projects/p1/streams/s1', {
+    name: 'new',
+    ports: [{ transport: 'UDP', port: 53 }],
+  });
   expect(apiClient.delete).toHaveBeenCalledWith('/projects/p1/streams/s1');
 });
 

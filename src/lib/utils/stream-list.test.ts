@@ -10,6 +10,7 @@ const s = (id: string, name: string, status: Stream['status']): Stream => ({
   k8sGatewayName: `str-${name}`,
   k8sGatewayClass: 'gc',
   status,
+  ports: [],
 });
 const all = [s('1', 'postgres', 'active'), s('2', 'cache', 'pending'), s('3', 'Cache-EU', 'error')];
 

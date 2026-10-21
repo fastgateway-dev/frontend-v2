@@ -10,6 +10,7 @@ import type {
   ReservedPort,
   ReservedPortReason,
   StreamEntrypoint,
+  StreamRoute,
   TransportPort,
 } from '@/types';
 
@@ -48,8 +49,16 @@ export function comparePorts(a: TransportPort, b: TransportPort): number {
   return a.port - b.port || a.transport.localeCompare(b.transport);
 }
 
+/** This stream's own claims (owner kind stream, same streamId), sorted. */
+export function myClaims(ports: EntrypointPort[], streamId: string): EntrypointPort[] {
+  if (!streamId) return [];
+  return ports
+    .filter((p) => p.owner.kind === 'stream' && p.owner.streamId === streamId)
+    .sort(comparePorts);
+}
+
 /**
- * mine = this stream's own route ports; neighbors = everything else on the entry
+ * mine = this stream's own claims; neighbors = everything else on the entry
  * point (other streams' routes, domains). With no streamId (stream create) every
  * port is a neighbour.
  */
@@ -60,7 +69,7 @@ export function splitPorts(
   const mine: EntrypointPort[] = [];
   const neighbors: EntrypointPort[] = [];
   for (const p of ports) {
-    if (streamId && p.owner.kind === 'stream_route' && p.owner.streamId === streamId) mine.push(p);
+    if (streamId && p.owner.kind === 'stream' && p.owner.streamId === streamId) mine.push(p);
     else neighbors.push(p);
   }
   return { mine: mine.sort(comparePorts), neighbors: neighbors.sort(comparePorts) };
@@ -95,7 +104,6 @@ const PLATFORM_RESERVED: ReservedPort[] = (
   [
     [19000, 'envoy_internal'],
     [19001, 'envoy_internal'],
-    [60000, 'placeholder'],
   ] as const
 ).flatMap(([port, reason]) =>
   (['TCP', 'UDP'] as const).map((transport) => ({ transport, port, reason }))
@@ -142,10 +150,12 @@ export function distinctPortCount(ports: TransportPort[]): number {
   return new Set(ports.map((p) => `${p.transport}/${p.port}`)).size;
 }
 
-/** "Stream cache · route redis" or "Domain api". */
+/** "Stream cache · route redis", "Stream cache" (a bare claim) or "Domain api". */
 export function ownerLabel(owner: EntrypointPortOwner): string {
   if (owner.kind === 'domain') return `Domain ${owner.domainName || owner.domainId || 'unknown'}`;
-  return `Stream ${owner.streamName || owner.streamId || 'unknown'} · route ${owner.routeName || owner.routeId || 'unknown'}`;
+  const stream = `Stream ${owner.streamName || owner.streamId || 'unknown'}`;
+  const route = owner.routeName || owner.routeId;
+  return route ? `${stream} · route ${route}` : stream;
 }
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
@@ -153,4 +163,83 @@ const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 /** "2 streams and 1 domain". */
 export function sharedWithSummary(sharedWith: StreamEntrypoint['sharedWith']): string {
   return `${plural(sharedWith.streams.length, 'stream')} and ${plural(sharedWith.domains.length, 'domain')}`;
+}
+
+export type ClaimProblem = 'invalid' | 'reserved' | 'out_of_range' | 'duplicate' | 'taken';
+
+export interface ClaimContext {
+  range: PortRange | null;
+  reserved: ReservedPort[];
+  /** The entry point's port map; the stream's own claims in it are ignored. */
+  taken: EntrypointPort[];
+  selfStreamId?: string;
+}
+
+const sameClaim = (a: TransportPort, b: TransportPort) =>
+  a.port === b.port && a.transport.toUpperCase() === b.transport.toUpperCase();
+
+/** The entry point port-map row (not the stream's own) holding this claim, if any. */
+function takenBy(claim: TransportPort, ctx: ClaimContext): EntrypointPort | undefined {
+  return ctx.taken.find(
+    (t) =>
+      sameClaim(t, claim) &&
+      !(ctx.selfStreamId && t.owner.kind === 'stream' && t.owner.streamId === ctx.selfStreamId)
+  );
+}
+
+/**
+ * Why a claim can't be added to `current`, or null when it can. Checks in the
+ * order the user should fix them: bounds, reservations (transport-agnostic, like
+ * the backend), the template's range, the set itself, then other owners.
+ */
+export function claimProblem(
+  claim: TransportPort,
+  current: TransportPort[],
+  ctx: ClaimContext
+): ClaimProblem | null {
+  if (!Number.isInteger(claim.port) || claim.port < 1 || claim.port > 65535) return 'invalid';
+  if (ctx.reserved.some((r) => r.port === claim.port)) return 'reserved';
+  if (ctx.range && (claim.port < ctx.range.min || claim.port > ctx.range.max)) return 'out_of_range';
+  if (current.some((c) => sameClaim(c, claim))) return 'duplicate';
+  if (takenBy(claim, ctx)) return 'taken';
+  return null;
+}
+
+export function claimProblemMessage(p: ClaimProblem, claim: TransportPort, ctx: ClaimContext): string {
+  switch (p) {
+    case 'invalid':
+      return 'Port must be between 1 and 65535';
+    case 'reserved':
+      return `${portLabel(claim)} is reserved`;
+    case 'out_of_range':
+      return ctx.range ? `Must be within ${ctx.range.min}–${ctx.range.max}` : 'Port is outside the allowed range';
+    case 'duplicate':
+      return `${portLabel(claim)} is already claimed`;
+    case 'taken': {
+      const owner = takenBy(claim, ctx)?.owner;
+      return owner ? `${portLabel(claim)} is used by ${ownerLabel(owner)}` : `${portLabel(claim)} is used by another owner`;
+    }
+  }
+}
+
+/**
+ * Claimed ports on a transport that no live route uses, ascending. A route
+ * being edited (ownRouteId) doesn't hold its own port; rejected routes hold none.
+ */
+export function freeClaims(
+  claims: TransportPort[],
+  routes: StreamRoute[],
+  transport: 'TCP' | 'UDP',
+  ownRouteId?: string
+): number[] {
+  const used = new Set<number>();
+  for (const r of routes) {
+    const port = r.config?.listenerPort;
+    if (port == null || r.id === ownRouteId || r.status === 'rejected') continue;
+    if (r.protocol.toUpperCase() === transport) used.add(port);
+  }
+  return claims
+    .filter((c) => c.transport.toUpperCase() === transport && !used.has(c.port))
+    .map((c) => c.port)
+    .sort((a, b) => a - b);
 }

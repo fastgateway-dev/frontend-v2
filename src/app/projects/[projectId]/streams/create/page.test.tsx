@@ -54,8 +54,8 @@ const SHARED = {
     ],
   },
   ports: [
-    { transport: 'TCP', port: 9000, owner: { kind: 'stream_route', streamId: 's2', streamName: 'cache', routeId: 'r1', routeName: 'redis', status: 'active' } },
-    { transport: 'UDP', port: 9000, owner: { kind: 'stream_route', streamId: 's2', streamName: 'cache', routeId: 'r2', routeName: 'dns', status: 'active' } },
+    { transport: 'TCP', port: 9000, owner: { kind: 'stream', streamId: 's2', streamName: 'cache', routeId: 'r1', routeName: 'redis', status: 'active' } },
+    { transport: 'UDP', port: 9000, owner: { kind: 'stream', streamId: 's2', streamName: 'cache', routeId: 'r2', routeName: 'dns', status: 'active' } },
     { transport: 'TCP', port: 443, owner: { kind: 'domain', domainId: 'd1', domainName: 'api' } },
   ],
   reserved: [...RESERVED, { transport: 'TCP', port: 443, reason: 'template_listener' }],
