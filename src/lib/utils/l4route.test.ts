@@ -4,27 +4,18 @@ import {
   diffMode,
   emptyPolicyForm,
   errorsForTab,
-  findPortCollision,
   l4RouteKind,
   l4StatusBadge,
   mergeTabErrors,
   parseListenerPort,
   policyCapabilities,
   policySummary,
-  portInRange,
-  rangeError,
   routeActions,
   tabErrors,
   tabForErrorKey,
   validateL4Form,
   type L4ValidationInput,
 } from './l4route';
-import type { StreamRoute } from '@/types';
-
-const routes: StreamRoute[] = [
-  { id: 'r1', name: 'db', protocol: 'tcp', status: 'active', config: { listenerPort: 5432 } },
-  { id: 'r2', name: 'dns', protocol: 'udp', status: 'active', config: { listenerPort: 53 } },
-];
 
 describe('policyCapabilities', () => {
   test('tcp gets circuit breaker + LB + health check', () => {
@@ -65,22 +56,6 @@ describe('buildPolicy', () => {
   });
 });
 
-describe('findPortCollision', () => {
-  test('same protocol + port collides', () => {
-    expect(findPortCollision(routes, 5432, 'tcp')).toMatchObject({ routeName: 'db' });
-  });
-  test('tcp:53 does not collide with udp:53', () => {
-    expect(findPortCollision(routes, 53, 'tcp')).toBeNull();
-    expect(findPortCollision(routes, 53, 'udp')).toMatchObject({ routeName: 'dns' });
-  });
-  test('editing a route does not collide with itself', () => {
-    expect(findPortCollision(routes, 5432, 'tcp', 'r1')).toBeNull();
-  });
-  test('null port never collides', () => {
-    expect(findPortCollision(routes, null, 'tcp')).toBeNull();
-  });
-});
-
 test('parseListenerPort accepts only 1-65535 integers', () => {
   expect(parseListenerPort('5432')).toBe(5432);
   expect(parseListenerPort('0')).toBeNull();
@@ -113,23 +88,6 @@ test('buildCreateInput puts listenerPort in config with no L7 fields', () => {
   });
 });
 
-describe('portInRange / rangeError', () => {
-  test('portInRange', () => {
-    expect(portInRange(9042, 9000, 9100)).toBe(true);
-    expect(portInRange(9000, 9000, 9100)).toBe(true);
-    expect(portInRange(9100, 9000, 9100)).toBe(true);
-    expect(portInRange(8125, 9000, 9100)).toBe(false);
-  });
-  test('rangeError is null when in range', () => {
-    expect(rangeError(9042, 9000, 9100)).toBeNull();
-  });
-  test('rangeError mentions both bounds when out of range', () => {
-    const msg = rangeError(8125, 9000, 9100);
-    expect(msg).toMatch(/9000/);
-    expect(msg).toMatch(/9100/);
-  });
-});
-
 describe('form tabs', () => {
   test('tabForErrorKey maps every validation key to its tab', () => {
     expect(['name', 'team', 'port'].map(tabForErrorKey)).toEqual(['basic', 'basic', 'basic']);
@@ -149,15 +107,13 @@ describe('form tabs', () => {
   });
 });
 
-describe('validateL4Form (rules unchanged from the form)', () => {
+describe('validateL4Form', () => {
   const ok = (): L4ValidationInput => ({
     isEdit: false,
     name: 'web',
     teamId: 't1',
     protocol: 'tcp',
     port: 6379,
-    range: { min: 5000, max: 7000 },
-    collision: null,
     backends: [{ namespace: 'ns', service: 'pg', port: '5432', weight: '100' }],
   });
   test('a valid form has no errors', () => {
@@ -170,13 +126,9 @@ describe('validateL4Form (rules unchanged from the form)', () => {
     });
     expect(validateL4Form({ ...ok(), isEdit: true, name: '', teamId: '' })).toEqual({});
   });
-  test('port: unparseable, then out of range, then collision', () => {
-    expect(validateL4Form({ ...ok(), port: null }).port).toBe('Listener port must be an integer between 1 and 65535');
-    expect(validateL4Form({ ...ok(), port: 9000 }).port).toBe('Listener port must be between 5000 and 7000');
-    expect(validateL4Form({ ...ok(), port: 9000, range: null }).port).toBeUndefined();
-    expect(
-      validateL4Form({ ...ok(), collision: { routeId: 'r1', routeName: 'db', port: 6379, protocol: 'tcp' } }).port
-    ).toBe('Port 6379/TCP is already used by route "db"');
+  test('port: a port must be selected', () => {
+    expect(validateL4Form({ ...ok(), port: null }).port).toBe('Select a listener port');
+    expect(validateL4Form({ ...ok(), port: 6379 }).port).toBeUndefined();
   });
   test('backends: none, incomplete, bad port, bad weight', () => {
     expect(validateL4Form({ ...ok(), backends: [] }).backends).toBe('At least one backend is required');

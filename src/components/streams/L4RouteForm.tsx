@@ -24,8 +24,8 @@ import {
   TabsTrigger,
   TabsContent,
 } from '@/components/ui';
-import { streamsApi, projectTeamsApi, projectNamespacesApi, kubernetesApi, domainTemplatesApi } from '@/lib/api';
-import type { DomainTemplate, ProjectTeamRole, Stream, StreamRoute, K8sService, LoadBalancerType } from '@/types';
+import { streamsApi, projectTeamsApi, projectNamespacesApi, kubernetesApi, permissionsApi } from '@/lib/api';
+import type { ProjectPermissions, ProjectTeamRole, Stream, StreamRoute, K8sService, LoadBalancerType } from '@/types';
 import { L4ManifestDiff, type L4ManifestPair } from './L4ManifestDiff';
 import {
   L4_FORM_TABS,
@@ -34,7 +34,6 @@ import {
   buildUpdateInput,
   emptyPolicyForm,
   errorsForTab,
-  findPortCollision,
   l4RouteKind,
   mergeTabErrors,
   parseListenerPort,
@@ -47,7 +46,7 @@ import {
   type L4PolicyForm,
   type L4Protocol,
 } from '@/lib/utils/l4route';
-import { streamListener } from '@/lib/utils/gateway-listeners';
+import { freeClaims, portLabel } from '@/lib/utils/stream-entrypoint';
 
 interface Props {
   projectId: string;
@@ -73,7 +72,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const doneUrl = routeId ? `${streamUrl}/routes/${routeId}` : streamUrl;
 
   const [stream, setStream] = useState<Stream | null>(null);
-  const [template, setTemplate] = useState<DomainTemplate | null>(null);
+  const [permissions, setPermissions] = useState<ProjectPermissions | null>(null);
   const [teams, setTeams] = useState<ProjectTeamRole[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [existingRoutes, setExistingRoutes] = useState<StreamRoute[]>([]);
@@ -105,23 +104,18 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const previewSeq = useRef(0);
 
   const caps = policyCapabilities(protocol);
-  const port = parseListenerPort(portInput);
+  const transport = protocol === 'udp' ? 'UDP' : 'TCP';
 
-  // Allowed listener-port range from the stream template's TCP/UDP listener.
-  // Unknown (template fetch failed / no stream listener) => no client-side
-  // range check; the server's 400 stays authoritative either way.
-  const range = useMemo(() => {
-    const sl = streamListener(template?.listeners ?? []);
-    return sl && sl.portRangeMin != null && sl.portRangeMax != null
-      ? { min: sl.portRangeMin, max: sl.portRangeMax }
-      : null;
-  }, [template]);
-
-  // Live (client-side) collision check against the ports already on this stream.
-  const collision = useMemo(
-    () => findPortCollision(existingRoutes, port, protocol, routeId),
-    [existingRoutes, port, protocol, routeId]
+  // The stream's claimed ports on this protocol that no other route uses. The
+  // route being edited doesn't hold its own port, so it stays selectable.
+  const freePorts = useMemo(
+    () => freeClaims(stream?.ports ?? [], existingRoutes, transport, routeId),
+    [stream, existingRoutes, transport, routeId]
   );
+  // Only a free claim counts as a selection; anything else (a stale value, a
+  // legacy route port that isn't claimed) must be re-picked.
+  const parsedPort = parseListenerPort(portInput);
+  const port = parsedPort != null && freePorts.includes(parsedPort) ? parsedPort : null;
 
   const ensureServices = async (ns: string) => {
     if (!ns || requestedNs.current.has(ns)) return;
@@ -137,21 +131,17 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   useEffect(() => {
     const load = async () => {
       try {
-        const [streamData, routesData, nsData, teamsData, routeData] = await Promise.all([
+        const [streamData, routesData, nsData, teamsData, routeData, permsData] = await Promise.all([
           streamsApi.get(projectId, streamId),
           streamsApi.listRoutes(projectId, streamId).catch(() => ({ data: [] as StreamRoute[] })),
           projectNamespacesApi.list(projectId).catch(() => []),
           projectTeamsApi.listMyTeams(projectId).catch(() => [] as ProjectTeamRole[]),
           routeId ? streamsApi.getRoute(projectId, streamId, routeId) : Promise.resolve(null),
+          // Best-effort: only decides whether "Claim another port" is a link.
+          permissionsApi.getProjectPermissions(projectId).catch(() => null),
         ]);
         setStream(streamData);
-        // Best-effort: the template gives the allowed port range. On failure
-        // fall back to the plain 1-65535 check and let the server decide.
-        try {
-          setTemplate(await domainTemplatesApi.get(projectId, streamData.gatewayTemplateId));
-        } catch {
-          setTemplate(null);
-        }
+        setPermissions(permsData);
         setExistingRoutes(routesData.data || []);
         const nsNames = (nsData || []).filter((n) => n.referenceGrantCreated).map((n) => n.namespace);
         setNamespaces(nsNames);
@@ -188,6 +178,14 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   const updateBackend = (i: number, patch: Partial<L4BackendForm>) =>
     setBackends((prev) => prev.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
 
+  // A selection the new protocol doesn't offer is dropped, not carried over.
+  const onProtocolChange = (p: L4Protocol) => {
+    setProtocol(p);
+    const t = p === 'udp' ? 'UDP' : 'TCP';
+    const free = freeClaims(stream?.ports ?? [], existingRoutes, t, routeId);
+    if (parsedPort == null || !free.includes(parsedPort)) setPortInput('');
+  };
+
   const onNamespaceChange = (i: number, ns: string) => {
     updateBackend(i, { namespace: ns, service: '', port: '' });
     ensureServices(ns);
@@ -201,7 +199,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
 
   const patchPolicy = (patch: Partial<L4PolicyForm>) => setPolicy((p) => ({ ...p, ...patch }));
 
-  const validateAll = () => validateL4Form({ isEdit, name, teamId, protocol, port, range, collision, backends });
+  const validateAll = () => validateL4Form({ isEdit, name, teamId, protocol, port, backends });
 
   const formValues = (listenerPort: number) => ({
     name: name.trim(),
@@ -233,7 +231,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
     setPreviewError(null);
     if (port == null) {
       setIsPreviewLoading(false);
-      setPreviewError('Enter a listener port between 1 and 65535 on Basic Info to preview the manifests.');
+      setPreviewError('Select a listener port on Basic Info to preview the manifests.');
       return;
     }
     setIsPreviewLoading(true);
@@ -298,9 +296,11 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
     } catch (error: unknown) {
       const err = error as { response?: { status?: number; data?: { error?: string } } };
       const msg = err.response?.data?.error;
-      if (err.response?.status === 409) {
-        // Authoritative port-collision error from the backend, shown on the port field.
-        setServerPortError(msg || 'Listener port is already in use');
+      const status = err.response?.status;
+      if (status === 409 || (status === 400 && /not claimed by the stream/i.test(msg ?? ''))) {
+        // Authoritative port error from the backend (in use by another route /
+        // not claimed by the stream), shown on the port field.
+        setServerPortError(msg || 'Listener port is not available');
         setActiveTab('basic');
       } else {
         setSubmitError(msg || `Failed to ${isEdit ? 'update' : 'create'} route`);
@@ -336,9 +336,6 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   }
 
   const portError = serverPortError || formErrors.port;
-  const portWarning = !portError && collision
-    ? `Port ${collision.port}/${collision.protocol.toUpperCase()} is already used by route "${collision.routeName}"`
-    : null;
   const errorTabs = tabErrors({ ...formErrors, port: portError });
 
   return (
@@ -406,7 +403,7 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
                             value={p}
                             checked={protocol === p}
                             disabled={isEdit}
-                            onChange={() => setProtocol(p)}
+                            onChange={() => onProtocolChange(p)}
                           />
                           {p.toUpperCase()}
                         </label>
@@ -415,27 +412,38 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
                   </fieldset>
 
                   <div>
-                    <Input
+                    <Select
                       id="listenerPort"
                       label="Listener Port"
-                      inputMode="numeric"
-                      placeholder="e.g., 5432"
-                      value={portInput}
+                      value={port != null ? String(port) : ''}
+                      disabled={freePorts.length === 0}
                       onChange={(e) => {
                         setPortInput(e.target.value);
                         setServerPortError(null);
                       }}
+                      options={[
+                        { value: '', label: 'Select...' },
+                        ...freePorts.map((p) => ({ value: String(p), label: portLabel({ transport, port: p }) })),
+                      ]}
                       error={portError}
                     />
-                    {portWarning && (
-                      <p role="alert" data-testid="port-collision" className="mt-1 text-sm text-amber-700">
-                        {portWarning}
+                    {freePorts.length === 0 ? (
+                      <p data-testid="no-free-ports" className="mt-1 text-sm text-amber-700">
+                        All of this stream&apos;s {transport} ports are in use.{' '}
+                        {permissions?.canManageDomains ? (
+                          <Link href={streamUrl} className="underline">
+                            Claim another port on the stream.
+                          </Link>
+                        ) : (
+                          'Claim another port on the stream.'
+                        )}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-gray-500">
+                        The Gateway listener port this route is exposed on: one of the ports this stream has claimed
+                        that no other route uses.
                       </p>
                     )}
-                    <p className="mt-1 text-xs text-gray-500">
-                      The Gateway listener port this route is exposed on. A port can be used once per protocol.
-                      {range && <> Allowed range: {range.min}–{range.max}.</>}
-                    </p>
                   </div>
                 </div>
               </TabsContent>

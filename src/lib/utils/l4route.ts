@@ -64,49 +64,11 @@ export const emptyPolicyForm = (): L4PolicyForm => ({
   hcHealthyThreshold: '',
 });
 
-export interface PortCollision {
-  routeId: string;
-  routeName: string;
-  port: number;
-  protocol: L4Protocol;
-}
-
 /** Parses a listener-port string; returns null unless it is an integer in 1-65535. */
 export function parseListenerPort(raw: string): number | null {
   if (!/^\d+$/.test(raw.trim())) return null;
   const n = Number(raw);
   return n >= 1 && n <= 65535 ? n : null;
-}
-
-/**
- * Client-side live collision check. A Gateway listener is identified by
- * (transport, port), so tcp:53 and udp:53 coexist but tcp:5432 twice does not.
- * Authoritative enforcement (merged templates, reserved ports) is the backend 409.
- */
-export function findPortCollision(
-  existing: StreamRoute[],
-  port: number | null,
-  protocol: L4Protocol,
-  excludeRouteId?: string
-): PortCollision | null {
-  if (port == null) return null;
-  const hit = existing.find(
-    (r) =>
-      r.id !== excludeRouteId &&
-      (r.protocol || '').toLowerCase() === protocol &&
-      r.config?.listenerPort === port
-  );
-  return hit ? { routeId: hit.id, routeName: hit.name, port, protocol } : null;
-}
-
-/** True iff min <= port <= max (purely numeric; the range comes from the caller). */
-export function portInRange(port: number, min: number, max: number): boolean {
-  return port >= min && port <= max;
-}
-
-/** Null when the port is within [min, max]; otherwise a message naming both bounds. */
-export function rangeError(port: number, min: number, max: number): string | null {
-  return portInRange(port, min, max) ? null : `Listener port must be between ${min} and ${max}`;
 }
 
 const toInt = (s: string): number | undefined => {
@@ -278,26 +240,19 @@ export interface L4ValidationInput {
   name: string;
   teamId: string;
   protocol: L4Protocol;
-  /** parseListenerPort() result. */
+  /** The selected claimed port, or null when none is selected. */
   port: number | null;
-  /** Template TCP/UDP range; null = unknown, so no client-side range check. */
-  range: { min: number; max: number } | null;
-  collision: PortCollision | null;
   backends: L4BackendForm[];
 }
 
-/** The L4 route form's client-side rules (unchanged). Keys: name, team, port, backends, backend-<i>. */
+/** The L4 route form's client-side rules; the server's 400/409 stays authoritative for the port. Keys: name, team, port, backends, backend-<i>. */
 export function validateL4Form(v: L4ValidationInput): Record<string, string> {
   const errs: Record<string, string> = {};
   if (!v.isEdit) {
     if (!v.name.trim()) errs.name = 'Name is required';
     if (!v.teamId) errs.team = 'Owner team is required';
   }
-  const outOfRange = v.port != null && v.range ? rangeError(v.port, v.range.min, v.range.max) : null;
-  if (v.port == null) errs.port = 'Listener port must be an integer between 1 and 65535';
-  else if (outOfRange) errs.port = outOfRange;
-  else if (v.collision)
-    errs.port = `Port ${v.port}/${v.protocol.toUpperCase()} is already used by route "${v.collision.routeName}"`;
+  if (v.port == null) errs.port = 'Select a listener port';
   if (v.backends.length === 0) errs.backends = 'At least one backend is required';
   v.backends.forEach((b, i) => {
     if (!b.namespace || !b.service) errs[`backend-${i}`] = 'Namespace and service are required';
