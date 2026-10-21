@@ -29,14 +29,16 @@ test('shows the Gateway open and each route collapsed with its BackendTrafficPol
 test('no routes explains the Gateway listens on the claimed ports', async () => {
   (streamsApi.getYamls as jest.Mock).mockResolvedValue({ gatewayYaml: 'kind: Gateway', routes: [] });
   render(<StreamManifests projectId="p1" streamId="s1" />);
-  expect(await screen.findByText("No routes yet. The Gateway listens on this stream's claimed ports.")).toBeInTheDocument();
+  expect(await screen.findByText("No live routes yet. The Gateway listens on this stream's claimed ports.")).toBeInTheDocument();
 });
 
 test('a stream with no claims has no Gateway yet', async () => {
   (streamsApi.getYamls as jest.Mock).mockResolvedValue({ gatewayYaml: '', routes: [] });
   render(<StreamManifests projectId="p1" streamId="s1" />);
   expect(await screen.findByText('No ports claimed, so this stream has no Gateway yet.')).toBeInTheDocument();
-  expect(screen.queryByText(/No routes yet/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/No live routes yet/)).not.toBeInTheDocument();
+  // No empty Gateway accordion item either.
+  expect(screen.queryByRole('button', { name: 'Gateway' })).not.toBeInTheDocument();
 });
 
 test('refetches when refreshKey changes', async () => {

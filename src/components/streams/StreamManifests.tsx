@@ -52,12 +52,14 @@ export function StreamManifests({ projectId, streamId, refreshKey = 0 }: Props) 
   return (
     <div className="space-y-3">
       <Accordion type="multiple" defaultValue={['gateway']}>
-        <AccordionItem value="gateway">
-          <AccordionTrigger value="gateway">Gateway</AccordionTrigger>
-          <AccordionContent value="gateway">
-            <ManifestYaml yaml={data.gatewayYaml} />
-          </AccordionContent>
-        </AccordionItem>
+        {data.gatewayYaml && (
+          <AccordionItem value="gateway">
+            <AccordionTrigger value="gateway">Gateway</AccordionTrigger>
+            <AccordionContent value="gateway">
+              <ManifestYaml yaml={data.gatewayYaml} />
+            </AccordionContent>
+          </AccordionItem>
+        )}
         {data.routes.map((r) => {
           const key = `route-${r.routeId}`;
           return (
@@ -81,7 +83,7 @@ export function StreamManifests({ projectId, streamId, refreshKey = 0 }: Props) 
       {data.routes.length === 0 && (
         <p className="text-sm text-gray-500">
           {data.gatewayYaml
-            ? "No routes yet. The Gateway listens on this stream's claimed ports."
+            ? "No live routes yet. The Gateway listens on this stream's claimed ports."
             : 'No ports claimed, so this stream has no Gateway yet.'}
         </p>
       )}
