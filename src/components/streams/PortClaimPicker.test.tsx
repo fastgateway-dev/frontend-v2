@@ -113,6 +113,13 @@ describe('PortClaimPicker', () => {
     expect(remove).toBeDisabled();
     expect(remove).toHaveAttribute('title', 'Used by route postgres');
     expect(screen.getAllByTestId('port-claim-chip')[0]).toHaveAttribute('title', 'Used by route postgres');
+    // Also exposed beyond hover: visually hidden text the button is described by.
+    expect(remove).toHaveAccessibleDescription('Used by route postgres');
+    const hidden = screen.getByText('Used by route postgres');
+    expect(hidden).toHaveClass('sr-only');
+    expect(remove.getAttribute('aria-describedby')).toBe(hidden.id);
+    expect(screen.getAllByTestId('port-claim-chip')[0]).toContainElement(hidden);
+    expect(screen.getByRole('button', { name: 'Remove 6379/TCP' })).not.toHaveAttribute('aria-describedby');
     await userEvent.click(remove);
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Remove 6379/TCP' })).toBeEnabled();

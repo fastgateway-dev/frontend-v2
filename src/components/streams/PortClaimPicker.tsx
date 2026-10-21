@@ -150,6 +150,7 @@ export function PortClaimPicker({
           {sorted.map((p) => {
             const reason = lockReason(p);
             const label = portLabel(p);
+            const reasonId = `${uid}-lock-${p.transport}-${p.port}`;
             return (
               <li key={`${p.transport}/${p.port}`}>
                 <Badge
@@ -163,12 +164,18 @@ export function PortClaimPicker({
                     type="button"
                     aria-label={`Remove ${label}`}
                     title={reason}
+                    aria-describedby={reason ? reasonId : undefined}
                     disabled={disabled || !!reason}
                     onClick={() => onChange(value.filter((c) => !sameClaim(c, p)))}
                     className="-mr-1 rounded-full p-0.5 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
                   >
                     {reason ? <Lock className="h-3 w-3" /> : <X className="h-3 w-3" />}
                   </button>
+                  {reason && (
+                    <span id={reasonId} className="sr-only">
+                      {reason}
+                    </span>
+                  )}
                 </Badge>
               </li>
             );
