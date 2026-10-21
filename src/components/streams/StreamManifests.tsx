@@ -13,9 +13,11 @@ import { ManifestYaml } from './ManifestYaml';
 interface Props {
   projectId: string;
   streamId: string;
+  /** Bump to re-fetch (e.g. after the stream's ports changed). */
+  refreshKey?: number;
 }
 
-export function StreamManifests({ projectId, streamId }: Props) {
+export function StreamManifests({ projectId, streamId, refreshKey = 0 }: Props) {
   const [data, setData] = useState<StreamYAMLs | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +36,7 @@ export function StreamManifests({ projectId, streamId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [projectId, streamId]);
+  }, [projectId, streamId, refreshKey]);
 
   if (error) {
     return (
@@ -75,7 +77,11 @@ export function StreamManifests({ projectId, streamId }: Props) {
         })}
       </Accordion>
       {data.routes.length === 0 && (
-        <p className="text-sm text-gray-500">No live routes yet, so the Gateway has only the placeholder listener.</p>
+        <p className="text-sm text-gray-500">
+          {data.gatewayYaml
+            ? "No routes yet. The Gateway listens on this stream's claimed ports."
+            : 'No ports claimed, so this stream has no Gateway yet.'}
+        </p>
       )}
     </div>
   );

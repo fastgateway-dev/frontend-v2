@@ -3,14 +3,15 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Trash2, AlertTriangle, Plus, Rocket } from 'lucide-react';
+import { ArrowLeft, Trash2, AlertTriangle, Plus, Rocket, Pencil } from 'lucide-react';
 import { Button, Card, CardContent, Badge, Modal, Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
 import { streamsApi, permissionsApi } from '@/lib/api';
 import { L4MetricsCard } from '@/components/metrics/L4MetricsCard';
 import { StreamEntrypointPanel } from '@/components/streams/StreamEntrypointPanel';
 import { StreamManifests } from '@/components/streams/StreamManifests';
+import { EditStreamPortsModal } from '@/components/streams/EditStreamPortsModal';
 import { l4StatusBadge } from '@/lib/utils/l4route';
-import type { Stream, StreamRoute, ProjectPermissions } from '@/types';
+import type { Stream, StreamEntrypoint, StreamRoute, ProjectPermissions } from '@/types';
 
 export default function StreamDetailPage() {
   const params = useParams();
@@ -29,8 +30,10 @@ export default function StreamDetailPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deployingRouteId, setDeployingRouteId] = useState<string | null>(null);
   const [routeActionError, setRouteActionError] = useState<string | null>(null);
-  // Bumped after a deploy so the Entry point panel re-reads port statuses.
+  // Bumped after a deploy or a port change so the Entry point panel and Manifests tab re-read.
   const [refreshKey, setRefreshKey] = useState(0);
+  const [entrypoint, setEntrypoint] = useState<StreamEntrypoint | null>(null);
+  const [showEditPorts, setShowEditPorts] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -84,6 +87,12 @@ export default function StreamDetailPage() {
     } finally {
       setDeployingRouteId(null);
     }
+  };
+
+  const handlePortsSaved = (saved: Stream) => {
+    setStream((prev) => (prev ? { ...prev, ...saved } : saved));
+    setShowEditPorts(false);
+    setRefreshKey((k) => k + 1);
   };
 
   const canDeployRoute = (route: StreamRoute) => route.status === 'approved' || route.status === 'pending_deploy';
@@ -142,10 +151,16 @@ export default function StreamDetailPage() {
           </p>
         </div>
         {permissions?.canManageDomains && (
-          <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setShowEditPorts(true)} disabled={!entrypoint}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit ports
+            </Button>
+            <Button variant="danger" onClick={() => setShowDeleteModal(true)}>
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
+            </Button>
+          </div>
         )}
       </div>
 
@@ -171,7 +186,7 @@ export default function StreamDetailPage() {
       )}
 
       <div className="mb-6">
-        <StreamEntrypointPanel projectId={projectId} streamId={streamId} refreshKey={refreshKey} />
+        <StreamEntrypointPanel projectId={projectId} streamId={streamId} refreshKey={refreshKey} onLoad={setEntrypoint} />
       </div>
 
       <Card>
@@ -253,11 +268,22 @@ export default function StreamDetailPage() {
             </TabsContent>
 
             <TabsContent value="manifests">
-              <StreamManifests projectId={projectId} streamId={streamId} />
+              <StreamManifests projectId={projectId} streamId={streamId} refreshKey={refreshKey} />
             </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
+
+      {entrypoint && (
+        <EditStreamPortsModal
+          projectId={projectId}
+          stream={stream}
+          entrypoint={entrypoint}
+          open={showEditPorts}
+          onClose={() => setShowEditPorts(false)}
+          onSaved={handlePortsSaved}
+        />
+      )}
 
       <Modal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Delete Stream">
         <div className="space-y-4">

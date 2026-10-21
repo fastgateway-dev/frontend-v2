@@ -1,5 +1,5 @@
-// Pure helpers for a Stream's entry point: mode wording, the port map split
-// (this stream's ports vs neighbours), the free-port count and owner labels.
+// Pure helpers for a Stream's entry point: mode wording, this stream's claims,
+// the free-port count and owner labels.
 // Kept free of React so they can be unit-tested directly.
 import type {
   DomainTemplate,
@@ -9,7 +9,6 @@ import type {
   PortRange,
   ReservedPort,
   ReservedPortReason,
-  StreamEntrypoint,
   StreamRoute,
   TransportPort,
 } from '@/types';
@@ -55,24 +54,6 @@ export function myClaims(ports: EntrypointPort[], streamId: string): EntrypointP
   return ports
     .filter((p) => p.owner.kind === 'stream' && p.owner.streamId === streamId)
     .sort(comparePorts);
-}
-
-/**
- * mine = this stream's own claims; neighbors = everything else on the entry
- * point (other streams' routes, domains). With no streamId (stream create) every
- * port is a neighbour.
- */
-export function splitPorts(
-  ports: EntrypointPort[],
-  streamId?: string
-): { mine: EntrypointPort[]; neighbors: EntrypointPort[] } {
-  const mine: EntrypointPort[] = [];
-  const neighbors: EntrypointPort[] = [];
-  for (const p of ports) {
-    if (streamId && p.owner.kind === 'stream' && p.owner.streamId === streamId) mine.push(p);
-    else neighbors.push(p);
-  }
-  return { mine: mine.sort(comparePorts), neighbors: neighbors.sort(comparePorts) };
 }
 
 export function rangeSize(range: PortRange): number {
@@ -141,27 +122,12 @@ export function reservedLabel(r: ReservedPort): string {
   return `${portLabel(r)} (${REASON_LABELS[r.reason] ?? r.reason})`;
 }
 
-/**
- * Distinct (transport, port) pairs held. Owner rows are not ports: several
- * domains binding the same listener port are one port.
- */
-export function distinctPortCount(ports: TransportPort[]): number {
-  return new Set(ports.map((p) => `${p.transport}/${p.port}`)).size;
-}
-
 /** "Stream cache · route redis", "Stream cache" (a bare claim) or "Domain api". */
 export function ownerLabel(owner: EntrypointPortOwner): string {
   if (owner.kind === 'domain') return `Domain ${owner.domainName || owner.domainId || 'unknown'}`;
   const stream = `Stream ${owner.streamName || owner.streamId || 'unknown'}`;
   const route = owner.routeName || owner.routeId;
   return route ? `${stream} · route ${route}` : stream;
-}
-
-const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
-
-/** "2 streams and 1 domain". */
-export function sharedWithSummary(sharedWith: StreamEntrypoint['sharedWith']): string {
-  return `${plural(sharedWith.streams.length, 'stream')} and ${plural(sharedWith.domains.length, 'domain')}`;
 }
 
 export type ClaimProblem = 'invalid' | 'reserved' | 'out_of_range' | 'duplicate' | 'taken';

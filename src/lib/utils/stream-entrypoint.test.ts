@@ -1,7 +1,6 @@
 import {
   claimProblem,
   claimProblemMessage,
-  distinctPortCount,
   entrypointLabel,
   freeClaims,
   freePortCount,
@@ -11,8 +10,6 @@ import {
   rangeSize,
   reservedLabel,
   reservedSummary,
-  sharedWithSummary,
-  splitPorts,
   templateOptionLabel,
   withDefaultReserved,
 } from './stream-entrypoint';
@@ -60,19 +57,6 @@ describe('entrypointLabel', () => {
 test('templateOptionLabel shows the mode', () => {
   expect(templateOptionLabel({ name: 'shared-envoy', mergeGateways: true })).toBe('shared-envoy — Shared IP');
   expect(templateOptionLabel({ name: 'edge-l4', mergeGateways: false })).toBe('edge-l4 — Dedicated IP');
-});
-
-describe('splitPorts', () => {
-  test('mine are this stream route ports; everything else is a neighbour; both sorted', () => {
-    const { mine: m, neighbors: n } = splitPorts([other(9001), mine(9002), domain(443), mine(53, 'UDP'), mine(53)], 's1');
-    expect(m.map(portLabel)).toEqual(['53/TCP', '53/UDP', '9002/TCP']);
-    expect(n.map(portLabel)).toEqual(['443/TCP', '9001/TCP']);
-  });
-  test('without a stream id (create) every port is a neighbour', () => {
-    const { mine: m, neighbors: n } = splitPorts([mine(9000), domain(443)]);
-    expect(m).toEqual([]);
-    expect(n).toHaveLength(2);
-  });
 });
 
 describe('freePortCount / rangeSize', () => {
@@ -143,33 +127,6 @@ describe('ownerLabel', () => {
   });
   test('a stream claim with no route is just the stream', () => {
     expect(ownerLabel({ kind: 'stream', streamId: 's2', streamName: 'cache' })).toBe('Stream cache');
-  });
-});
-
-test('sharedWithSummary pluralises', () => {
-  expect(sharedWithSummary({ streams: [{ id: 'a', name: 'a' }], domains: [] })).toBe('1 stream and 0 domains');
-  expect(
-    sharedWithSummary({
-      streams: [{ id: 'a', name: 'a' }, { id: 'b', name: 'b' }],
-      domains: [{ id: 'd', name: 'd', hostname: 'd.example.com' }],
-    })
-  ).toBe('2 streams and 1 domain');
-});
-
-describe('distinctPortCount', () => {
-  test('counts ports, not owner rows: two domains on the same listener port are one port', () => {
-    const d = (port: number, domainId: string): EntrypointPort => ({
-      transport: 'TCP',
-      port,
-      owner: { kind: 'domain', domainId, domainName: domainId },
-    });
-    expect(distinctPortCount([d(443, 'd1'), d(443, 'd2'), d(80, 'd1'), d(80, 'd2'), other(9001)])).toBe(3);
-  });
-  test('the same number on TCP and UDP is two ports', () => {
-    expect(distinctPortCount([mine(53), mine(53, 'UDP')])).toBe(2);
-  });
-  test('no ports is zero', () => {
-    expect(distinctPortCount([])).toBe(0);
   });
 });
 
