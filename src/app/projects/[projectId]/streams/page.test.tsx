@@ -22,7 +22,7 @@ jest.mock('@/lib/api', () => ({
         {
           id: 's2', projectId: 'p1', name: 'cache', namespace: 'ns', gatewayTemplateId: 't2',
           k8sGatewayName: 'str-cache', k8sGatewayClass: 'gc2', status: 'pending',
-          mode: 'dedicated', gatewayTemplateName: 'edge-l4', routeCount: 0, ports: [],
+          mode: 'dedicated', gatewayTemplateName: 'edge-l4', routeCount: 0, ports: [{ transport: 'TCP', port: 5432 }],
         },
         {
           id: 's3', projectId: 'p1', name: 'legacy', namespace: 'ns', gatewayTemplateId: 't3',
@@ -49,7 +49,10 @@ test('shows entry point, route count and the first three ports (no IP column: th
   expect(within(pg).getByText('4')).toBeInTheDocument();
   expect(screen.getByTestId('ports-s1')).toHaveTextContent('53/UDP, 5432/TCP, 6379/TCP +1');
   expect(within(rowOf('cache')).getByText('Dedicated IP')).toBeInTheDocument();
+  // A stream with a claim but no routes still lists its claimed port, with Routes 0.
   expect(within(rowOf('cache')).getByText('0')).toBeInTheDocument();
+  expect(screen.getByTestId('ports-s2')).toHaveTextContent('5432/TCP');
+  expect(screen.getByTestId('ports-s2')).not.toHaveTextContent('—');
   // A stream without the list fields (older backend) still renders, with dashes.
   // Entry point, Routes and Ports render dashes (there is no IP column).
   expect(within(rowOf('legacy')).getAllByText('—').length).toBeGreaterThanOrEqual(3);
