@@ -336,6 +336,9 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
   }
 
   const portError = serverPortError || formErrors.port;
+  // A legacy stream with no claims at all reads differently from one whose claims are all taken.
+  const noClaims = (stream.ports ?? []).length === 0;
+  const claimLabel = noClaims ? 'Claim a port on the stream.' : 'Claim another port on the stream.';
   const errorTabs = tabErrors({ ...formErrors, port: portError });
 
   return (
@@ -429,13 +432,15 @@ export function L4RouteForm({ projectId, streamId, routeId }: Props) {
                     />
                     {freePorts.length === 0 ? (
                       <p data-testid="no-free-ports" className="mt-1 text-sm text-amber-700">
-                        All of this stream&apos;s {transport} ports are in use.{' '}
+                        {noClaims
+                          ? 'This stream has no ports claimed. '
+                          : `All of this stream's ${transport} ports are in use. `}
                         {permissions?.canManageDomains ? (
                           <Link href={streamUrl} className="underline">
-                            Claim another port on the stream.
+                            {claimLabel}
                           </Link>
                         ) : (
-                          'Claim another port on the stream.'
+                          claimLabel
                         )}
                       </p>
                     ) : (

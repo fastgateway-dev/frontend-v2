@@ -81,7 +81,10 @@ const fillValid = async (port: string) => {
 const submitFromPreview = async (label = 'Create Route') => {
   tab(/^Preview/);
   await waitFor(() => expect(screen.queryByText('Generating preview…')).not.toBeInTheDocument());
-  fireEvent.click(screen.getByRole('button', { name: label }));
+  // act(async) lets the submit's trailing state updates (setIsSubmitting in `finally`) flush inside the test.
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: label }));
+  });
 };
 
 test('lays the form out in four tabs and starts on Basic Info', async () => {
@@ -157,6 +160,29 @@ describe('no free claim on the protocol', () => {
     expect(screen.getByTestId('no-free-ports')).toHaveTextContent(
       "All of this stream's UDP ports are in use. Claim another port on the stream."
     );
+  });
+
+  test('a stream with no claims at all says so, with the same link rule', async () => {
+    (streamsApi.get as jest.Mock).mockResolvedValue({ id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1', ports: [] });
+    await renderCreate();
+    expect(await screen.findByTestId('no-free-ports')).toHaveTextContent(
+      'This stream has no ports claimed. Claim a port on the stream.'
+    );
+    expect(screen.getByRole('link', { name: 'Claim a port on the stream.' })).toHaveAttribute(
+      'href',
+      '/projects/p1/streams/s1'
+    );
+    expect(screen.queryByText(/ports are in use/)).not.toBeInTheDocument();
+  });
+
+  test('a stream with no claims is plain text without canManageDomains', async () => {
+    (streamsApi.get as jest.Mock).mockResolvedValue({ id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1', ports: [] });
+    (permissionsApi.getProjectPermissions as jest.Mock).mockResolvedValue({ canManageDomains: false });
+    await renderCreate();
+    expect(await screen.findByTestId('no-free-ports')).toHaveTextContent(
+      'This stream has no ports claimed. Claim a port on the stream.'
+    );
+    expect(screen.queryByRole('link', { name: /Claim a port/ })).not.toBeInTheDocument();
   });
 
   test('is plain text when the permissions fetch fails', async () => {
