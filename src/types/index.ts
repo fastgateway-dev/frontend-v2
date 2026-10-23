@@ -311,18 +311,22 @@ export interface Stream {
   gatewayTemplateName?: string;
   /** Non-rejected L4 routes on the stream. */
   routeCount?: number;
-  /** (transport, port) of the stream's non-rejected L4 routes. */
-  ports?: TransportPort[];
+  /** The stream's claimed (transport, port) pairs, TCP before UDP then by port. */
+  ports: TransportPort[];
 }
 
 export interface CreateStreamInput {
   name: string;
   namespace: string;
   gatewayTemplateId: string;
+  /** At least one claim. */
+  ports: TransportPort[];
 }
 
 export interface UpdateStreamInput {
   name?: string;
+  /** Full replacement set of claims. */
+  ports?: TransportPort[];
 }
 
 /** Minimal shape of an L4 route owned by a Stream (full L4 route model lands with the L4 route form). */
@@ -348,12 +352,14 @@ export interface TransportPort {
 }
 
 export interface EntrypointPortOwner {
-  kind: 'stream_route' | 'domain';
+  kind: 'stream' | 'domain';
   streamId?: string;
   streamName?: string;
+  /** Route fields are only present on the viewed stream's own claims. */
   routeId?: string;
   routeName?: string;
   status?: string;
+  pending?: boolean;
   domainId?: string;
   domainName?: string;
 }
@@ -362,7 +368,7 @@ export interface EntrypointPort extends TransportPort {
   owner: EntrypointPortOwner;
 }
 
-export type ReservedPortReason = 'envoy_internal' | 'placeholder' | 'template_listener';
+export type ReservedPortReason = 'envoy_internal' | 'template_listener';
 
 export interface ReservedPort extends TransportPort {
   reason: ReservedPortReason;

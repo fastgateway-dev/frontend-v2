@@ -26,7 +26,6 @@ import { streamsApi, domainTemplatesApi } from '@/lib/api';
 const RESERVED = [
   { transport: 'TCP', port: 19000, reason: 'envoy_internal' },
   { transport: 'TCP', port: 19001, reason: 'envoy_internal' },
-  { transport: 'TCP', port: 60000, reason: 'placeholder' },
 ];
 const DEDICATED = {
   mode: 'dedicated',
@@ -54,8 +53,8 @@ const SHARED = {
     ],
   },
   ports: [
-    { transport: 'TCP', port: 9000, owner: { kind: 'stream_route', streamId: 's2', streamName: 'cache', routeId: 'r1', routeName: 'redis', status: 'active' } },
-    { transport: 'UDP', port: 9000, owner: { kind: 'stream_route', streamId: 's2', streamName: 'cache', routeId: 'r2', routeName: 'dns', status: 'active' } },
+    { transport: 'TCP', port: 9000, owner: { kind: 'stream', streamId: 's2', streamName: 'cache', routeId: 'r1', routeName: 'redis', status: 'active' } },
+    { transport: 'UDP', port: 9000, owner: { kind: 'stream', streamId: 's2', streamName: 'cache', routeId: 'r2', routeName: 'dns', status: 'active' } },
     { transport: 'TCP', port: 443, owner: { kind: 'domain', domainId: 'd1', domainName: 'api' } },
   ],
   reserved: [...RESERVED, { transport: 'TCP', port: 443, reason: 'template_listener' }],
@@ -76,9 +75,18 @@ async function pick(templateId?: string) {
   if (templateId) fireEvent.change(screen.getByLabelText('Gateway Template'), { target: { value: templateId } });
 }
 
+/** Types a port into the picker and clicks Add. */
+function claim(port: string, transport?: 'TCP' | 'UDP') {
+  if (transport) fireEvent.click(screen.getByLabelText(transport));
+  fireEvent.change(screen.getByLabelText('Port'), { target: { value: port } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+}
+
 async function fillAndSubmit() {
   await pick('t1');
+  await waitFor(() => expect(panel()).toHaveTextContent('Dedicated IP'));
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'pg' } });
+  claim('9050');
   fireEvent.click(screen.getByRole('button', { name: 'Create Stream' }));
 }
 
@@ -112,31 +120,129 @@ test('a dedicated template explains its own IP and the port range', async () => 
   expect(panel()).toHaveTextContent('Dedicated IP');
 });
 
-test('a shared template shows who shares it, an unassigned address and the free ports', async () => {
+test('a shared template shows its mode, IP and the free ports but not who shares it', async () => {
   await pick('t2');
   await waitFor(() => expect(panel()).toHaveTextContent('joins the shared entry point shared-envoy-clusterip'));
   expect(panel()).toHaveTextContent('IP assigned on first deploy');
-  expect(panel()).toHaveTextContent('also used by 1 stream and 2 domains');
   expect(panel()).toHaveTextContent('100 of 101 ports free in 9000–9100');
+  expect(panel()).toHaveTextContent('Shared IP');
+  expect(panel()).not.toHaveTextContent('also used by');
+  expect(screen.queryByRole('button', { name: /who shares it/i })).not.toBeInTheDocument();
   expect(screen.queryByTestId('shared-with-list')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Show who shares it' }));
-  expect(screen.getByTestId('shared-with-list')).toHaveTextContent('Stream cache');
-  expect(screen.getByTestId('shared-with-list')).toHaveTextContent('Domain api (api.example.com)');
 });
 
-test('stream create has no port, team or preview fields', async () => {
+test('stream create has no team or preview fields', async () => {
   await pick('t2');
   await waitFor(() => expect(panel()).toHaveTextContent('Shared IP'));
-  expect(screen.queryByLabelText(/port/i)).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/team/i)).not.toBeInTheDocument();
   expect(screen.queryByRole('tab', { name: /preview/i })).not.toBeInTheDocument();
+});
+
+test('the Ports field appears once a template is picked', async () => {
+  await pick();
+  expect(screen.queryByLabelText('Port')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Gateway Template'), { target: { value: 't1' } });
+  await waitFor(() => expect(screen.getByLabelText('Port')).toBeEnabled());
+  expect(screen.getByText('Ports')).toBeInTheDocument();
+  expect(document.body).toHaveTextContent('Port range 9000–9100 · 101 of 101 free');
+});
+
+test('Create is disabled until a port is claimed and sends the claims', async () => {
+  (streamsApi.create as jest.Mock).mockResolvedValue({ id: 's1' });
+  await pick('t1');
+  await waitFor(() => expect(screen.getByLabelText('Port')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'pg' } });
+  expect(screen.getByRole('button', { name: 'Create Stream' })).toBeDisabled();
+  claim('9050');
+  expect(screen.getByRole('button', { name: 'Create Stream' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create Stream' }));
+  await waitFor(() =>
+    expect(streamsApi.create).toHaveBeenCalledWith('p1', {
+      name: 'pg',
+      namespace: 'fastgateway-system',
+      gatewayTemplateId: 't1',
+      ports: [{ transport: 'TCP', port: 9050 }],
+    })
+  );
+});
+
+test('removing the last claim disables Create again', async () => {
+  await pick('t1');
+  await waitFor(() => expect(screen.getByLabelText('Port')).toBeEnabled());
+  claim('9050');
+  expect(screen.getByRole('button', { name: 'Create Stream' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Remove 9050/TCP' }));
+  expect(screen.getByRole('button', { name: 'Create Stream' })).toBeDisabled();
+});
+
+test('changing the template clears the claims', async () => {
+  await pick('t1');
+  await waitFor(() => expect(screen.getByLabelText('Port')).toBeEnabled());
+  claim('9050');
+  expect(screen.getAllByTestId('port-claim-chip')).toHaveLength(1);
+  fireEvent.change(screen.getByLabelText('Gateway Template'), { target: { value: 't2' } });
+  expect(screen.queryAllByTestId('port-claim-chip')).toHaveLength(0);
+  expect(screen.getByRole('button', { name: 'Create Stream' })).toBeDisabled();
+});
+
+test('the picker rejects a port another owner holds on a shared template', async () => {
+  await pick('t2');
+  await waitFor(() => expect(screen.getByLabelText('Port')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Port'), { target: { value: '9000' } });
+  expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+  fireEvent.click(screen.getByLabelText('UDP'));
+  fireEvent.change(screen.getByLabelText('Port'), { target: { value: '9001' } });
+  expect(screen.getByRole('button', { name: 'Add' })).toBeEnabled();
+});
+
+test('a 409 port error from the server shows under the picker', async () => {
+  const message = 'port 9050/TCP is already claimed by stream cache';
+  (streamsApi.create as jest.Mock).mockRejectedValue({ response: { status: 409, data: { error: message } } });
+  await fillAndSubmit();
+  await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+  expect(screen.queryByText('Failed to create stream')).not.toBeInTheDocument();
+  // Editing the claims dismisses the stale server error.
+  claim('9051');
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
 });
 
 test('a failed entry point load does not block create', async () => {
   (domainTemplatesApi.getEntrypoint as jest.Mock).mockRejectedValue({ response: { data: { error: 'boom' } } });
   await pick('t1');
   await waitFor(() => expect(panel()).toHaveTextContent('Could not load the entry point for this template (boom)'));
+});
+
+test('create still works when the entry point fails', async () => {
+  (domainTemplatesApi.getEntrypoint as jest.Mock).mockRejectedValue({ response: { data: { error: 'boom' } } });
+  (streamsApi.create as jest.Mock).mockResolvedValue({ id: 's1' });
+  await pick('t1');
+  await waitFor(() => expect(panel()).toHaveTextContent('You can still create the stream.'));
+  await waitFor(() => expect(screen.getByLabelText('Port')).toBeEnabled());
+  expect(screen.queryByText(/free/)).not.toBeInTheDocument();
+  // No range: any valid port is accepted client-side; the platform-reserved ports are still refused.
+  fireEvent.change(screen.getByLabelText('Port'), { target: { value: '19000' } });
+  expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'pg' } });
+  claim('5432');
+  fireEvent.click(screen.getByRole('button', { name: 'Create Stream' }));
+  await waitFor(() =>
+    expect(streamsApi.create).toHaveBeenCalledWith('p1', expect.objectContaining({ ports: [{ transport: 'TCP', port: 5432 }] }))
+  );
+});
+
+test('create still works while the entry point request never resolves', async () => {
+  (domainTemplatesApi.getEntrypoint as jest.Mock).mockImplementation(() => new Promise(() => {}));
+  (streamsApi.create as jest.Mock).mockResolvedValue({ id: 's1' });
+  await pick('t1');
+  expect(panel()).toHaveTextContent('Loading entry point');
+  expect(screen.getByLabelText('Port')).toBeEnabled();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'pg' } });
+  claim('5432');
   expect(screen.getByRole('button', { name: 'Create Stream' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create Stream' }));
+  await waitFor(() =>
+    expect(streamsApi.create).toHaveBeenCalledWith('p1', expect.objectContaining({ ports: [{ transport: 'TCP', port: 5432 }] }))
+  );
 });
 
 // Review Focus: switching templates quickly.

@@ -10,6 +10,7 @@ const s = (id: string, name: string, status: Stream['status']): Stream => ({
   k8sGatewayName: `str-${name}`,
   k8sGatewayClass: 'gc',
   status,
+  ports: [],
 });
 const all = [s('1', 'postgres', 'active'), s('2', 'cache', 'pending'), s('3', 'Cache-EU', 'error')];
 
@@ -38,6 +39,9 @@ describe('portsSummary', () => {
         { transport: 'TCP', port: 5432 },
       ])
     ).toEqual({ shown: ['53/UDP', '5432/TCP', '6379/TCP'], more: 1 });
+  });
+  test('a claim with no routes is still listed', () => {
+    expect(portsSummary([{ transport: 'TCP', port: 5432 }])).toEqual({ shown: ['5432/TCP'], more: 0 });
   });
   test('no ports', () => {
     expect(portsSummary(undefined)).toEqual({ shown: [], more: 0 });

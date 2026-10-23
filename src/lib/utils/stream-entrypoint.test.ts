@@ -1,28 +1,29 @@
 import {
-  distinctPortCount,
+  claimProblem,
+  claimProblemMessage,
   entrypointLabel,
+  freeClaims,
   freePortCount,
+  myClaims,
   ownerLabel,
   portLabel,
   rangeSize,
   reservedLabel,
   reservedSummary,
-  sharedWithSummary,
-  splitPorts,
   templateOptionLabel,
   withDefaultReserved,
 } from './stream-entrypoint';
-import type { EntrypointPort, ReservedPort } from '@/types';
+import type { EntrypointPort, ReservedPort, StreamRoute } from '@/types';
 
 const mine = (port: number, transport = 'TCP'): EntrypointPort => ({
   transport,
   port,
-  owner: { kind: 'stream_route', streamId: 's1', streamName: 'test-stream', routeId: `r${port}`, routeName: `route-${port}`, status: 'active' },
+  owner: { kind: 'stream', streamId: 's1', streamName: 'test-stream', routeId: `r${port}`, routeName: `route-${port}`, status: 'active' },
 });
 const other = (port: number, transport = 'TCP'): EntrypointPort => ({
   transport,
   port,
-  owner: { kind: 'stream_route', streamId: 's2', streamName: 'cache', routeId: 'rx', routeName: 'redis', status: 'active' },
+  owner: { kind: 'stream', streamId: 's2', streamName: 'cache', routeId: 'rx', routeName: 'redis', status: 'active' },
 });
 const domain = (port: number): EntrypointPort => ({
   transport: 'TCP',
@@ -35,8 +36,6 @@ const DEFAULT_RESERVED: ReservedPort[] = [
   { transport: 'UDP', port: 19000, reason: 'envoy_internal' },
   { transport: 'TCP', port: 19001, reason: 'envoy_internal' },
   { transport: 'UDP', port: 19001, reason: 'envoy_internal' },
-  { transport: 'TCP', port: 60000, reason: 'placeholder' },
-  { transport: 'UDP', port: 60000, reason: 'placeholder' },
 ];
 
 describe('entrypointLabel', () => {
@@ -60,19 +59,6 @@ test('templateOptionLabel shows the mode', () => {
   expect(templateOptionLabel({ name: 'edge-l4', mergeGateways: false })).toBe('edge-l4 — Dedicated IP');
 });
 
-describe('splitPorts', () => {
-  test('mine are this stream route ports; everything else is a neighbour; both sorted', () => {
-    const { mine: m, neighbors: n } = splitPorts([other(9001), mine(9002), domain(443), mine(53, 'UDP'), mine(53)], 's1');
-    expect(m.map(portLabel)).toEqual(['53/TCP', '53/UDP', '9002/TCP']);
-    expect(n.map(portLabel)).toEqual(['443/TCP', '9001/TCP']);
-  });
-  test('without a stream id (create) every port is a neighbour', () => {
-    const { mine: m, neighbors: n } = splitPorts([mine(9000), domain(443)]);
-    expect(m).toEqual([]);
-    expect(n).toHaveLength(2);
-  });
-});
-
 describe('freePortCount / rangeSize', () => {
   test('null range gives null', () => {
     expect(freePortCount(null, [], DEFAULT_RESERVED)).toBeNull();
@@ -91,7 +77,7 @@ describe('freePortCount / rangeSize', () => {
     expect(freePortCount({ min: 50, max: 59 }, [mine(53), mine(53, 'UDP')], [])).toBe(9);
   });
   test('a reserved port inside the range is not free', () => {
-    expect(freePortCount({ min: 59990, max: 60009 }, [], DEFAULT_RESERVED)).toBe(19);
+    expect(freePortCount({ min: 18995, max: 19004 }, [], DEFAULT_RESERVED)).toBe(8);
   });
 });
 
@@ -104,17 +90,15 @@ describe('withDefaultReserved (Review Focus: response omits platform ports)', ()
       '19000/UDP (Envoy internal)',
       '19001/TCP (Envoy internal)',
       '19001/UDP (Envoy internal)',
-      '60000/TCP (Placeholder listener)',
-      '60000/UDP (Placeholder listener)',
     ]);
   });
   test('an empty list still yields the platform ports on both transports', () => {
     expect(withDefaultReserved([]).map(portLabel)).toEqual([
-      '19000/TCP', '19000/UDP', '19001/TCP', '19001/UDP', '60000/TCP', '60000/UDP',
+      '19000/TCP', '19000/UDP', '19001/TCP', '19001/UDP',
     ]);
   });
   test('does not duplicate entries the backend already sent (keyed by transport + port)', () => {
-    expect(withDefaultReserved(DEFAULT_RESERVED)).toHaveLength(6);
+    expect(withDefaultReserved(DEFAULT_RESERVED)).toHaveLength(4);
   });
 });
 
@@ -126,47 +110,165 @@ describe('reservedSummary', () => {
       '443/TCP (Template listener)',
       '19000/TCP+UDP (Envoy internal)',
       '19001/TCP+UDP (Envoy internal)',
-      '60000/TCP+UDP (Placeholder listener)',
     ]);
   });
 });
 
 describe('ownerLabel', () => {
-  test('stream route', () => {
+  test('stream with a route', () => {
     expect(ownerLabel(other(9001).owner)).toBe('Stream cache · route redis');
   });
   test('domain', () => {
     expect(ownerLabel(domain(443).owner)).toBe('Domain api');
   });
   test('falls back to ids when names are missing', () => {
-    expect(ownerLabel({ kind: 'stream_route', streamId: 's9', routeId: 'r9' })).toBe('Stream s9 · route r9');
+    expect(ownerLabel({ kind: 'stream', streamId: 's9', routeId: 'r9' })).toBe('Stream s9 · route r9');
     expect(ownerLabel({ kind: 'domain', domainId: 'd9' })).toBe('Domain d9');
   });
+  test('a stream claim with no route is just the stream', () => {
+    expect(ownerLabel({ kind: 'stream', streamId: 's2', streamName: 'cache' })).toBe('Stream cache');
+  });
 });
 
-test('sharedWithSummary pluralises', () => {
-  expect(sharedWithSummary({ streams: [{ id: 'a', name: 'a' }], domains: [] })).toBe('1 stream and 0 domains');
-  expect(
-    sharedWithSummary({
-      streams: [{ id: 'a', name: 'a' }, { id: 'b', name: 'b' }],
-      domains: [{ id: 'd', name: 'd', hostname: 'd.example.com' }],
-    })
-  ).toBe('2 streams and 1 domain');
+const claim = (port: number, transport: 'TCP' | 'UDP' = 'TCP') => ({ transport, port });
+const ctx = (over: Partial<Parameters<typeof claimProblem>[2]> = {}) => ({
+  range: { min: 1000, max: 65535 } as { min: number; max: number } | null,
+  reserved: DEFAULT_RESERVED,
+  taken: [] as EntrypointPort[],
+  selfStreamId: 's1',
+  ...over,
 });
 
-describe('distinctPortCount', () => {
-  test('counts ports, not owner rows: two domains on the same listener port are one port', () => {
-    const d = (port: number, domainId: string): EntrypointPort => ({
-      transport: 'TCP',
-      port,
-      owner: { kind: 'domain', domainId, domainName: domainId },
+describe('claimProblem', () => {
+  test('0 and out-of-bounds ports are invalid', () => {
+    expect(claimProblem(claim(0), [], ctx())).toBe('invalid');
+    expect(claimProblem(claim(65536), [], ctx())).toBe('invalid');
+    expect(claimProblem(claim(1.5), [], ctx())).toBe('invalid');
+  });
+  test('a reserved port is reserved', () => {
+    expect(claimProblem(claim(19000), [], ctx())).toBe('reserved');
+  });
+  test('a port outside the template range is out_of_range; no range means no limit', () => {
+    expect(claimProblem(claim(80), [], ctx())).toBe('out_of_range');
+    expect(claimProblem(claim(80), [], ctx({ range: null }))).toBeNull();
+  });
+  test('the same port and transport already in the claim set is a duplicate', () => {
+    expect(claimProblem(claim(5432), [claim(5432)], ctx())).toBe('duplicate');
+  });
+  test('the same port on the other transport is not a duplicate', () => {
+    expect(claimProblem(claim(5432, 'UDP'), [claim(5432)], ctx())).toBeNull();
+  });
+  test('a port another stream holds on the same transport is taken', () => {
+    expect(claimProblem(claim(9000), [], ctx({ taken: [other(9000)] }))).toBe('taken');
+    expect(claimProblem(claim(9000), [], ctx({ taken: [domain(9000)] }))).toBe('taken');
+  });
+  test('a port taken on the other transport is free', () => {
+    expect(claimProblem(claim(9000, 'UDP'), [], ctx({ taken: [other(9000)] }))).toBeNull();
+  });
+  test('60000/UDP inside the range is fine (no longer reserved)', () => {
+    expect(claimProblem(claim(60000, 'UDP'), [], ctx())).toBeNull();
+  });
+  test("ignores the stream's own claims", () => {
+    expect(claimProblem(claim(9000), [], ctx({ taken: [mine(9000)] }))).toBeNull();
+  });
+  describe('reservations are per transport', () => {
+    const reserved: ReservedPort[] = [...DEFAULT_RESERVED, { transport: 'TCP', port: 443, reason: 'template_listener' }];
+    const c = () => ctx({ range: null, reserved: withDefaultReserved(reserved) });
+    test('UDP on a template listener TCP port is fine', () => {
+      expect(claimProblem(claim(443, 'UDP'), [], c())).toBeNull();
     });
-    expect(distinctPortCount([d(443, 'd1'), d(443, 'd2'), d(80, 'd1'), d(80, 'd2'), other(9001)])).toBe(3);
+    test('TCP on a template listener port is reserved', () => {
+      expect(claimProblem(claim(443), [], c())).toBe('reserved');
+    });
+    test('an Envoy internal port is reserved on UDP too', () => {
+      expect(claimProblem(claim(19000, 'UDP'), [], c())).toBe('reserved');
+    });
   });
-  test('the same number on TCP and UDP is two ports', () => {
-    expect(distinctPortCount([mine(53), mine(53, 'UDP')])).toBe(2);
+});
+
+describe('claimProblemMessage', () => {
+  test('copy per problem', () => {
+    const c = ctx({ taken: [other(9000)] });
+    expect(claimProblemMessage('invalid', claim(0), c)).toBe('Port must be between 1 and 65535');
+    expect(claimProblemMessage('reserved', claim(19000), c)).toBe('19000/TCP is reserved');
+    expect(claimProblemMessage('out_of_range', claim(80), c)).toBe('Must be within 1000–65535');
+    expect(claimProblemMessage('duplicate', claim(53, 'UDP'), c)).toBe('53/UDP is already claimed');
+    expect(claimProblemMessage('taken', claim(9000), c)).toBe('9000/TCP is used by Stream cache · route redis');
   });
-  test('no ports is zero', () => {
-    expect(distinctPortCount([])).toBe(0);
+  test('taken by a domain names the domain', () => {
+    expect(claimProblemMessage('taken', claim(443), ctx({ taken: [domain(443)] }))).toBe('443/TCP is used by Domain api');
+  });
+});
+
+describe('myClaims', () => {
+  test("keeps only this stream's own claims, sorted", () => {
+    const out = myClaims([other(9001), mine(9002), domain(443), mine(53, 'UDP'), mine(53)], 's1');
+    expect(out.map(portLabel)).toEqual(['53/TCP', '53/UDP', '9002/TCP']);
+  });
+  test('an empty stream id matches nothing', () => {
+    expect(myClaims([mine(9000)], '')).toEqual([]);
+  });
+});
+
+describe('freeClaims', () => {
+  const route = (id: string, listenerPort: number, protocol = 'tcp', status = 'active'): StreamRoute => ({
+    id,
+    name: id,
+    protocol,
+    status,
+    config: { listenerPort },
+  });
+  const claims = [claim(5432), claim(5433), claim(53, 'UDP')];
+  test('claims on the transport that no route uses', () => {
+    expect(freeClaims(claims, [route('r1', 5432)], 'TCP')).toEqual([5433]);
+  });
+  test("the route being edited keeps its own port", () => {
+    expect(freeClaims(claims, [route('r1', 5432)], 'TCP', 'r1')).toEqual([5432, 5433]);
+  });
+  test('UDP with no UDP route and no UDP claim', () => {
+    expect(freeClaims([claim(5432), claim(5433)], [route('r1', 5432)], 'UDP')).toEqual([]);
+  });
+  test('a TCP route does not use the UDP claim of the same number', () => {
+    expect(freeClaims([claim(53, 'UDP')], [route('r1', 53, 'tcp')], 'UDP')).toEqual([53]);
+  });
+  test('a rejected route does not hold its port', () => {
+    expect(freeClaims(claims, [route('r1', 5432, 'tcp', 'rejected')], 'TCP')).toEqual([5432, 5433]);
+  });
+
+  describe('with the entry point port map', () => {
+    const owned = (
+      port: number,
+      routeId: string | undefined,
+      extra: Partial<EntrypointPort['owner']> = {},
+      transport = 'TCP'
+    ): EntrypointPort => ({
+      transport,
+      port,
+      owner: { kind: 'stream', streamId: 's1', ...(routeId ? { routeId, routeName: routeId } : {}), ...extra },
+    });
+    test("another route's pending update holds the new port", () => {
+      const ep = [owned(5432, 'r1'), owned(5433, 'r1', { pending: true })];
+      expect(freeClaims(claims, [route('r1', 5432)], 'TCP', undefined, ep)).toEqual([]);
+    });
+    test('a route approved but not deployed still holds its deployed port', () => {
+      const ep = [owned(5432, 'r1', { status: 'pending_deploy' })];
+      expect(freeClaims(claims, [route('r1', 5433)], 'TCP', undefined, ep)).toEqual([]);
+    });
+    test('the route being edited holds nothing, whatever the entry point says', () => {
+      const ep = [owned(5432, 'r1'), owned(5433, 'r1', { pending: true })];
+      expect(freeClaims(claims, [route('r1', 5432)], 'TCP', 'r1', ep)).toEqual([5432, 5433]);
+    });
+    test('a bare claim (no route) and other transports hold nothing', () => {
+      const ep = [owned(5432, undefined), owned(53, 'r2', {}, 'TCP')];
+      expect(freeClaims(claims, [], 'TCP', undefined, ep)).toEqual([5432, 5433]);
+      expect(freeClaims(claims, [], 'UDP', undefined, ep)).toEqual([53]);
+    });
+    test('a rejected owner holds nothing', () => {
+      const ep = [owned(5433, 'r2', { status: 'rejected' })];
+      expect(freeClaims(claims, [], 'TCP', undefined, ep)).toEqual([5432, 5433]);
+    });
+    test('null (entry point unavailable) falls back to the route rows', () => {
+      expect(freeClaims(claims, [route('r1', 5432)], 'TCP', undefined, null)).toEqual([5433]);
+    });
   });
 });

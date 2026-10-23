@@ -6,8 +6,9 @@ import Link from 'next/link';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
 import { Button, Card, CardContent, Select, Input } from '@/components/ui';
 import { streamsApi, domainTemplatesApi, domainsApi, projectsApi } from '@/lib/api';
-import type { Project, DomainTemplate } from '@/types';
+import type { Project, DomainTemplate, StreamEntrypoint, TransportPort } from '@/types';
 import { TemplateEntrypointSummary } from '@/components/streams/TemplateEntrypointSummary';
+import { PortClaimPicker } from '@/components/streams/PortClaimPicker';
 import { templateOptionLabel } from '@/lib/utils/stream-entrypoint';
 
 const DEFAULT_NAMESPACE = 'fastgateway-system';
@@ -25,6 +26,10 @@ export default function CreateStreamPage() {
   const [name, setName] = useState('');
   const [namespace, setNamespace] = useState(DEFAULT_NAMESPACE);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [ports, setPorts] = useState<TransportPort[]>([]);
+  const [portsError, setPortsError] = useState<string | null>(null);
+  const [entrypoint, setEntrypoint] = useState<StreamEntrypoint | null>(null);
+  const [entrypointError, setEntrypointError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   const [isCreating, setIsCreating] = useState(false);
@@ -33,6 +38,27 @@ export default function CreateStreamPage() {
   useEffect(() => {
     loadData();
   }, [projectId]);
+
+  useEffect(() => {
+    setEntrypoint(null);
+    setEntrypointError(null);
+    if (!selectedTemplateId) return;
+    // The cleanup flag drops a late response for a template the user already left.
+    let cancelled = false;
+    domainTemplatesApi
+      .getEntrypoint(projectId, selectedTemplateId)
+      .then((data) => {
+        if (!cancelled) setEntrypoint(data);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const err = e as { response?: { data?: { error?: string } } };
+        setEntrypointError(err.response?.data?.error || 'request failed');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, selectedTemplateId]);
 
   const loadData = async () => {
     try {
@@ -66,16 +92,25 @@ export default function CreateStreamPage() {
 
     setIsCreating(true);
     setCreateError(null);
+    setPortsError(null);
     try {
       await streamsApi.create(projectId, {
         name: name.trim(),
         namespace,
         gatewayTemplateId: selectedTemplateId,
+        ports,
       });
       router.push(`/projects/${projectId}/streams`);
     } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } };
-      setCreateError(err.response?.data?.error || 'Failed to create stream');
+      const err = error as { response?: { status?: number; data?: { error?: string } } };
+      const message = err.response?.data?.error;
+      const status = err.response?.status;
+      // 400/409 port errors (bad, reserved, out of range, taken on a shared entry point) belong under the picker.
+      if (message && (status === 400 || status === 409) && /\bports?\b/i.test(message)) {
+        setPortsError(message);
+      } else {
+        setCreateError(message || 'Failed to create stream');
+      }
     } finally {
       setIsCreating(false);
     }
@@ -134,6 +169,9 @@ export default function CreateStreamPage() {
                   value={selectedTemplateId}
                   onChange={(e) => {
                     setSelectedTemplateId(e.target.value);
+                    // Claims are checked against one template's range and port map.
+                    setPorts([]);
+                    setPortsError(null);
                     setFormErrors((prev) => ({ ...prev, template: '' }));
                   }}
                   options={[
@@ -147,7 +185,7 @@ export default function CreateStreamPage() {
                 />
 
                 {selectedTemplateId && (
-                  <TemplateEntrypointSummary projectId={projectId} templateId={selectedTemplateId} />
+                  <TemplateEntrypointSummary entrypoint={entrypoint} error={entrypointError} />
                 )}
 
                 <Input
@@ -161,6 +199,26 @@ export default function CreateStreamPage() {
                   }}
                   error={formErrors.name}
                 />
+
+                {selectedTemplateId && (
+                  <div>
+                    <p className="block text-sm font-medium text-gray-700 mb-1">Ports</p>
+                    <p className="mb-2 text-xs text-gray-500">
+                      Claim at least one port for this stream. Routes can only use ports the stream has claimed.
+                    </p>
+                    <PortClaimPicker
+                      value={ports}
+                      onChange={(next) => {
+                        setPorts(next);
+                        setPortsError(null);
+                      }}
+                      range={entrypoint?.portRange ?? null}
+                      reserved={entrypoint?.reserved ?? []}
+                      taken={entrypoint?.ports ?? []}
+                      error={portsError ?? undefined}
+                    />
+                  </div>
+                )}
 
                 <div>
                   <Select
@@ -193,7 +251,7 @@ export default function CreateStreamPage() {
                       Cancel
                     </Button>
                   </Link>
-                  <Button onClick={handleCreate} isLoading={isCreating}>
+                  <Button onClick={handleCreate} isLoading={isCreating} disabled={ports.length === 0}>
                     Create Stream
                   </Button>
                 </div>

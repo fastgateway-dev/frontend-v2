@@ -1,25 +1,21 @@
 'use client';
 
-// Stream detail "Entry point" panel: mode, IP, who shares the entry point, and the
-// port map (this stream's ports in full, neighbours collapsed, reserved ports,
-// range and free count). Replaces the old "Load Balancer Address"/"Ports in use" cards.
+// Stream detail "Entry point" panel: mode, IP, this stream's port claims (each with
+// the route using it), reserved ports, range and free count.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Badge, Card, CardContent } from '@/components/ui';
 import { streamsApi } from '@/lib/api';
 import type { StreamEntrypoint } from '@/types';
 import {
-  distinctPortCount,
   entrypointLabel,
   freePortCount,
-  ownerLabel,
+  myClaims,
   portLabel,
   rangeSize,
   reservedSummary,
-  sharedWithSummary,
-  splitPorts,
   withDefaultReserved,
 } from '@/lib/utils/stream-entrypoint';
 import { l4StatusBadge } from '@/lib/utils/l4route';
@@ -29,13 +25,16 @@ interface Props {
   streamId: string;
   /** Bump to re-fetch (e.g. after a deploy changed a route's status). */
   refreshKey?: number;
+  /** Called with each successfully loaded entry point (the Edit ports modal needs it). */
+  onLoad?: (entrypoint: StreamEntrypoint) => void;
 }
 
-export function StreamEntrypointPanel({ projectId, streamId, refreshKey = 0 }: Props) {
+export function StreamEntrypointPanel({ projectId, streamId, refreshKey = 0, onLoad }: Props) {
   const [entrypoint, setEntrypoint] = useState<StreamEntrypoint | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showShared, setShowShared] = useState(false);
-  const [showNeighbors, setShowNeighbors] = useState(false);
+  // Latest callback without re-running the fetch when the parent re-renders.
+  const onLoadRef = useRef(onLoad);
+  onLoadRef.current = onLoad;
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +44,7 @@ export function StreamEntrypointPanel({ projectId, streamId, refreshKey = 0 }: P
         if (cancelled) return;
         setEntrypoint(data);
         setError(null);
+        onLoadRef.current?.(data);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -82,12 +82,10 @@ export function StreamEntrypointPanel({ projectId, streamId, refreshKey = 0 }: P
   }
 
   const label = entrypointLabel(entrypoint.mode);
-  const { mine, neighbors } = splitPorts(entrypoint.ports, streamId);
-  const neighborPorts = distinctPortCount(neighbors);
+  const mine = myClaims(entrypoint.ports, streamId);
   const reserved = withDefaultReserved(entrypoint.reserved);
   const range = entrypoint.portRange;
   const free = freePortCount(range, entrypoint.ports, reserved);
-  const { streams: sharedStreams, domains: sharedDomains } = entrypoint.sharedWith;
 
   return (
     <Card>
@@ -118,94 +116,38 @@ export function StreamEntrypointPanel({ projectId, streamId, refreshKey = 0 }: P
             </div>
           </dl>
 
-          {entrypoint.mode === 'shared' && (
-            <div>
-              <p className="text-gray-700">
-                Also used by {sharedWithSummary(entrypoint.sharedWith)}.{' '}
-                {sharedStreams.length + sharedDomains.length > 0 && (
-                  <button
-                    type="button"
-                    className="text-primary-600 hover:underline"
-                    onClick={() => setShowShared((v) => !v)}
-                  >
-                    {showShared ? 'Hide who shares it' : 'Show who shares it'}
-                  </button>
-                )}
-              </p>
-              {showShared && (
-                <ul data-testid="shared-with-list" className="mt-1 list-disc pl-5">
-                  {sharedStreams.map((s) => (
-                    <li key={`s-${s.id}`}>
-                      Stream{' '}
-                      <Link href={`/projects/${projectId}/streams/${s.id}`} className="text-primary-600 hover:underline">
-                        {s.name}
-                      </Link>
-                    </li>
-                  ))}
-                  {sharedDomains.map((d) => (
-                    <li key={`d-${d.id}`}>
-                      Domain{' '}
-                      <Link href={`/projects/${projectId}/domains/${d.id}`} className="text-primary-600 hover:underline">
-                        {d.name}
-                      </Link>{' '}
-                      ({d.hostname})
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
           <div>
             <h4 className="font-medium text-gray-900">This stream&apos;s ports</h4>
             {mine.length === 0 ? (
-              <p className="text-gray-500">No ports yet. Each route you add opens one port.</p>
+              <p className="text-gray-500">No ports claimed. Claim a port to create this stream&apos;s Gateway.</p>
             ) : (
               <ul data-testid="mine-ports" className="mt-1 space-y-1">
                 {mine.map((p) => {
-                  const badge = l4StatusBadge(p.owner.status || '');
+                  const routeId = p.owner.routeId;
+                  const badge = l4StatusBadge(p.owner.status || (p.owner.pending ? 'pending' : ''));
                   return (
                     <li key={`${p.transport}-${p.port}`} className="flex items-center gap-2">
                       <span className="font-mono">{portLabel(p)}</span>
-                      <span className="text-gray-400">→</span>
-                      <Link
-                        href={`/projects/${projectId}/streams/${streamId}/routes/${p.owner.routeId}`}
-                        className="text-primary-600 hover:underline"
-                      >
-                        {p.owner.routeName || p.owner.routeId}
-                      </Link>
-                      {p.owner.status && <Badge variant={badge.variant}>{badge.label}</Badge>}
+                      {routeId ? (
+                        <>
+                          <span className="text-gray-400">→</span>
+                          <Link
+                            href={`/projects/${projectId}/streams/${streamId}/routes/${routeId}`}
+                            className="text-primary-600 hover:underline"
+                          >
+                            {p.owner.routeName || routeId}
+                          </Link>
+                          {(p.owner.status || p.owner.pending) && <Badge variant={badge.variant}>{badge.label}</Badge>}
+                        </>
+                      ) : (
+                        <Badge variant="default">unused</Badge>
+                      )}
                     </li>
                   );
                 })}
               </ul>
             )}
           </div>
-
-          {neighbors.length > 0 && (
-            <div>
-              <p className="text-gray-700">
-                {neighborPorts} {neighborPorts === 1 ? 'port' : 'ports'} used by other streams/domains.{' '}
-                <button
-                  type="button"
-                  className="text-primary-600 hover:underline"
-                  onClick={() => setShowNeighbors((v) => !v)}
-                >
-                  {showNeighbors ? 'Hide other ports' : 'Show other ports'}
-                </button>
-              </p>
-              {showNeighbors && (
-                <ul data-testid="neighbor-ports" className="mt-1 space-y-1">
-                  {neighbors.map((p) => (
-                    <li key={`${p.transport}-${p.port}-${p.owner.routeId ?? p.owner.domainId ?? ''}`}>
-                      <span className="font-mono">{portLabel(p)}</span>{' '}
-                      <span className="text-gray-600">— {ownerLabel(p.owner)}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
 
           <p data-testid="reserved-ports" className="text-xs text-gray-500">
             Reserved: {reservedSummary(reserved).join(', ')}

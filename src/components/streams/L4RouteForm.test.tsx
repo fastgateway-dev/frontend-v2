@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { L4RouteForm } from './L4RouteForm';
 
 const push = jest.fn();
@@ -12,35 +12,50 @@ jest.mock('@/lib/api', () => ({
     getRoute: jest.fn(),
     previewCreateRoute: jest.fn(),
     previewUpdateRoute: jest.fn(),
+    getEntrypoint: jest.fn(),
   },
-  domainTemplatesApi: { get: jest.fn() },
+  permissionsApi: { getProjectPermissions: jest.fn() },
   projectTeamsApi: { listMyTeams: jest.fn() },
   projectNamespacesApi: { list: jest.fn() },
   kubernetesApi: { listServices: jest.fn() },
 }));
-import { streamsApi, domainTemplatesApi, projectTeamsApi, projectNamespacesApi, kubernetesApi } from '@/lib/api';
+import { streamsApi, permissionsApi, projectTeamsApi, projectNamespacesApi, kubernetesApi } from '@/lib/api';
 
 const ROUTE = {
   id: 'r1', name: 'db', description: 'pg', teamId: 't1', protocol: 'tcp', status: 'active',
   config: { matches: [], listenerPort: 5432, backends: [{ type: 'kubernetes', namespace: 'ns', service: 'pg', port: 5432, weight: 100 }] },
 };
 
+// 5432/TCP is used by route r1; the rest are free.
+const CLAIMS = [
+  { transport: 'TCP', port: 5432 },
+  { transport: 'TCP', port: 6379 },
+  { transport: 'TCP', port: 6380 },
+  { transport: 'UDP', port: 53 },
+  { transport: 'UDP', port: 5353 },
+];
+
+const optionLabels = () => within(screen.getByLabelText('Listener Port')).getAllByRole('option').map((o) => o.textContent);
+
 beforeEach(() => {
   jest.resetAllMocks();
-  (streamsApi.get as jest.Mock).mockResolvedValue({ id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1' });
+  (streamsApi.get as jest.Mock).mockResolvedValue({
+    id: 's1',
+    name: 'pg-stream',
+    gatewayTemplateId: 'gt1',
+    ports: CLAIMS,
+  });
   (streamsApi.listRoutes as jest.Mock).mockResolvedValue({
     data: [{ id: 'r1', name: 'db', protocol: 'tcp', status: 'active', config: { listenerPort: 5432 } }],
   });
   (streamsApi.getRoute as jest.Mock).mockResolvedValue(ROUTE);
+  (streamsApi.getEntrypoint as jest.Mock).mockResolvedValue({ ports: [] });
   (streamsApi.previewCreateRoute as jest.Mock).mockResolvedValue({ proposedYaml: 'kind: TCPRoute\nname: web' });
   (streamsApi.previewUpdateRoute as jest.Mock).mockResolvedValue({
     currentYaml: 'kind: TCPRoute\nport: 5432',
     proposedYaml: 'kind: TCPRoute\nport: 5433',
   });
-  (domainTemplatesApi.get as jest.Mock).mockResolvedValue({
-    id: 'gt1',
-    listeners: [{ name: 'l4', protocol: 'TCP', portRangeMin: 5000, portRangeMax: 7000 }],
-  });
+  (permissionsApi.getProjectPermissions as jest.Mock).mockResolvedValue({ canManageDomains: true });
   (projectTeamsApi.listMyTeams as jest.Mock).mockResolvedValue([{ team: { id: 't1', name: 'Team' } }]);
   (projectNamespacesApi.list as jest.Mock).mockResolvedValue([{ namespace: 'ns', referenceGrantCreated: true }]);
   (kubernetesApi.listServices as jest.Mock).mockResolvedValue([
@@ -68,7 +83,10 @@ const fillValid = async (port: string) => {
 const submitFromPreview = async (label = 'Create Route') => {
   tab(/^Preview/);
   await waitFor(() => expect(screen.queryByText('Generating preview…')).not.toBeInTheDocument());
-  fireEvent.click(screen.getByRole('button', { name: label }));
+  // act(async) lets the submit's trailing state updates (setIsSubmitting in `finally`) flush inside the test.
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: label }));
+  });
 };
 
 test('lays the form out in four tabs and starts on Basic Info', async () => {
@@ -95,12 +113,184 @@ test('gates policy sections by protocol', async () => {
   expect(screen.getByTestId('udp-policy-note')).toBeInTheDocument();
 });
 
-test('shows a live collision warning for an in-use port and allows tcp/udp on the same port', async () => {
+test('lists the stream\'s free claims for the protocol as port/transport options', async () => {
   await renderCreate();
-  fireEvent.change(screen.getByLabelText('Listener Port'), { target: { value: '5432' } });
-  expect(screen.getByTestId('port-collision')).toHaveTextContent('"db"');
+  expect(screen.getByLabelText('Listener Port').tagName).toBe('SELECT');
+  expect(optionLabels()).toEqual(['Select...', '6379/TCP', '6380/TCP']);
   fireEvent.click(screen.getByRole('radio', { name: 'UDP' }));
-  expect(screen.queryByTestId('port-collision')).not.toBeInTheDocument();
+  expect(optionLabels()).toEqual(['Select...', '53/UDP', '5353/UDP']);
+});
+
+test('switching protocol clears a selection the new protocol does not offer', async () => {
+  await renderCreate();
+  fireEvent.change(screen.getByLabelText('Listener Port'), { target: { value: '6379' } });
+  expect(screen.getByLabelText('Listener Port')).toHaveValue('6379');
+  fireEvent.click(screen.getByRole('radio', { name: 'UDP' }));
+  expect(screen.getByLabelText('Listener Port')).toHaveValue('');
+  fireEvent.click(screen.getByRole('radio', { name: 'TCP' }));
+  expect(screen.getByLabelText('Listener Port')).toHaveValue('');
+});
+
+describe('free claims also honour the entry point (pending approvals, deployed ports)', () => {
+  const owner = (port: number, routeId: string, extra: Record<string, unknown> = {}) => ({
+    transport: 'TCP',
+    port,
+    owner: { kind: 'stream', streamId: 's1', streamName: 'pg-stream', routeId, routeName: routeId, ...extra },
+  });
+  const CLAIMS_3 = [
+    { transport: 'TCP', port: 5432 },
+    { transport: 'TCP', port: 5433 },
+    { transport: 'TCP', port: 6379 },
+  ];
+  beforeEach(() => {
+    (streamsApi.get as jest.Mock).mockResolvedValue({ id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1', ports: CLAIMS_3 });
+  });
+
+  test("another route's pending update to a port keeps it out of the list", async () => {
+    // Route row still on 5432; its pending update (5433) is only in the entry point.
+    (streamsApi.getEntrypoint as jest.Mock).mockResolvedValue({
+      ports: [owner(5432, 'r1'), owner(5433, 'r1', { pending: true })],
+    });
+    await renderCreate();
+    expect(streamsApi.getEntrypoint).toHaveBeenCalledWith('p1', 's1');
+    expect(optionLabels()).toEqual(['Select...', '6379/TCP']);
+  });
+
+  test('a route approved but not deployed still holds its deployed port', async () => {
+    // Route row already moved to 5433; the old 5432 is still deployed.
+    (streamsApi.listRoutes as jest.Mock).mockResolvedValue({
+      data: [{ id: 'r1', name: 'db', protocol: 'tcp', status: 'active', config: { listenerPort: 5433 } }],
+    });
+    (streamsApi.getEntrypoint as jest.Mock).mockResolvedValue({
+      ports: [owner(5432, 'r1', { status: 'pending_deploy' })],
+    });
+    await renderCreate();
+    expect(optionLabels()).toEqual(['Select...', '6379/TCP']);
+  });
+
+  test('falls back to the route rows when the entry point fails to load', async () => {
+    (streamsApi.getEntrypoint as jest.Mock).mockRejectedValue({ response: { status: 500 } });
+    await renderCreate();
+    expect(optionLabels()).toEqual(['Select...', '5433/TCP', '6379/TCP']);
+  });
+
+  test("editing a route keeps its own claims selectable, but not another route's", async () => {
+    (streamsApi.getEntrypoint as jest.Mock).mockResolvedValue({
+      ports: [owner(5432, 'r1'), owner(5433, 'r1', { pending: true }), owner(6379, 'r2')],
+    });
+    render(<L4RouteForm projectId="p1" streamId="s1" routeId="r1" />);
+    expect(await screen.findByLabelText('Name')).toHaveValue('db');
+    expect(optionLabels()).toEqual(['Select...', '5432/TCP', '5433/TCP']);
+    expect(screen.getByLabelText('Listener Port')).toHaveValue('5432');
+  });
+});
+
+describe('no free claim on the protocol', () => {
+  const NO_FREE = 'All of this stream\'s TCP ports are in use. Claim another port on the stream.';
+  beforeEach(() => {
+    (streamsApi.get as jest.Mock).mockResolvedValue({
+      id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1', ports: [{ transport: 'TCP', port: 5432 }],
+    });
+  });
+
+  test('links to the stream for users who can manage it, and blocks Next', async () => {
+    await renderCreate();
+    expect(await screen.findByText(/All of this stream's TCP ports are in use\./)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Claim another port on the stream.' })).toHaveAttribute(
+      'href',
+      '/projects/p1/streams/s1'
+    );
+    expect(screen.getByTestId('no-free-ports')).toHaveTextContent(NO_FREE);
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'web' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByTestId('tab-error-basic')).toBeInTheDocument();
+    expect(screen.getByLabelText('Listener Port')).toBeInTheDocument();
+  });
+
+  test('is plain text without canManageDomains', async () => {
+    (permissionsApi.getProjectPermissions as jest.Mock).mockResolvedValue({ canManageDomains: false });
+    await renderCreate();
+    expect(await screen.findByTestId('no-free-ports')).toHaveTextContent(NO_FREE);
+    expect(screen.queryByRole('link', { name: /Claim another port/ })).not.toBeInTheDocument();
+  });
+
+  test('uses the UDP wording when every UDP claim is in use', async () => {
+    (streamsApi.get as jest.Mock).mockResolvedValue({
+      id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1',
+      ports: [{ transport: 'TCP', port: 5432 }, { transport: 'UDP', port: 53 }],
+    });
+    (streamsApi.listRoutes as jest.Mock).mockResolvedValue({
+      data: [{ id: 'r2', name: 'dns', protocol: 'udp', status: 'active', config: { listenerPort: 53 } }],
+    });
+    await renderCreate();
+    fireEvent.click(screen.getByRole('radio', { name: 'UDP' }));
+    expect(screen.getByTestId('no-free-ports')).toHaveTextContent(
+      "All of this stream's UDP ports are in use. Claim another port on the stream."
+    );
+  });
+
+  test('a stream with no claims at all says so, with the same link rule', async () => {
+    (streamsApi.get as jest.Mock).mockResolvedValue({ id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1', ports: [] });
+    await renderCreate();
+    expect(await screen.findByTestId('no-free-ports')).toHaveTextContent(
+      'This stream has no ports claimed. Claim a port on the stream.'
+    );
+    expect(screen.getByRole('link', { name: 'Claim a port on the stream.' })).toHaveAttribute(
+      'href',
+      '/projects/p1/streams/s1'
+    );
+    expect(screen.queryByText(/ports are in use/)).not.toBeInTheDocument();
+  });
+
+  test('a stream with no claims is plain text without canManageDomains', async () => {
+    (streamsApi.get as jest.Mock).mockResolvedValue({ id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1', ports: [] });
+    (permissionsApi.getProjectPermissions as jest.Mock).mockResolvedValue({ canManageDomains: false });
+    await renderCreate();
+    expect(await screen.findByTestId('no-free-ports')).toHaveTextContent(
+      'This stream has no ports claimed. Claim a port on the stream.'
+    );
+    expect(screen.queryByRole('link', { name: /Claim a port/ })).not.toBeInTheDocument();
+  });
+
+  test('a stream with claims on the other transport only says it has none on this one', async () => {
+    await renderCreate();
+    fireEvent.click(screen.getByRole('radio', { name: 'UDP' }));
+    expect(screen.getByTestId('no-free-ports')).toHaveTextContent(
+      'This stream has no UDP ports claimed. Claim a port on the stream.'
+    );
+    expect(screen.getByRole('link', { name: 'Claim a port on the stream.' })).toHaveAttribute(
+      'href',
+      '/projects/p1/streams/s1'
+    );
+    expect(screen.queryByText(/ports are in use/)).not.toBeInTheDocument();
+  });
+
+  test('the no-claims-on-this-transport copy is plain text without canManageDomains, and says TCP for UDP-only streams', async () => {
+    (permissionsApi.getProjectPermissions as jest.Mock).mockResolvedValue({ canManageDomains: false });
+    (streamsApi.get as jest.Mock).mockResolvedValue({
+      id: 's1', name: 'pg-stream', gatewayTemplateId: 'gt1', ports: [{ transport: 'UDP', port: 53 }],
+    });
+    await renderCreate();
+    expect(await screen.findByTestId('no-free-ports')).toHaveTextContent(
+      'This stream has no TCP ports claimed. Claim a port on the stream.'
+    );
+    expect(screen.queryByRole('link', { name: /Claim a port/ })).not.toBeInTheDocument();
+  });
+
+  test('is plain text when the permissions fetch fails', async () => {
+    (permissionsApi.getProjectPermissions as jest.Mock).mockRejectedValue(new Error('boom'));
+    await renderCreate();
+    expect(await screen.findByTestId('no-free-ports')).toHaveTextContent(NO_FREE);
+    expect(screen.queryByRole('link', { name: /Claim another port/ })).not.toBeInTheDocument();
+  });
+
+  test('blocks submit', async () => {
+    await renderCreate();
+    await fillValid('');
+    await submitFromPreview();
+    expect(await screen.findByTestId('tab-error-basic')).toBeInTheDocument();
+    expect(streamsApi.createRoute).not.toHaveBeenCalled();
+  });
 });
 
 test('Next checks only the current tab, then advances; Back returns', async () => {
@@ -140,11 +330,11 @@ test('stepping into Preview with Next does not submit the form', async () => {
   expect(streamsApi.createRoute).not.toHaveBeenCalled();
 });
 
-test('blocks submit on a client-side collision and returns to Basic Info', async () => {
+test('blocks submit until a port is selected and returns to Basic Info', async () => {
   await renderCreate();
-  await fillValid('5432');
+  await fillValid('');
   await submitFromPreview();
-  expect(await screen.findAllByText(/already used by route "db"/)).not.toHaveLength(0);
+  expect(await screen.findAllByText('Select a listener port')).not.toHaveLength(0);
   expect(screen.getByTestId('tab-error-basic')).toBeInTheDocument();
   expect(streamsApi.createRoute).not.toHaveBeenCalled();
 });
@@ -186,23 +376,28 @@ test('shows the server 409 on the port field back on Basic Info', async () => {
   expect(push).not.toHaveBeenCalled();
 });
 
-test('shows the allowed range and blocks submit for a port outside it', async () => {
+test('shows the server 400 "not claimed" on the port field back on Basic Info', async () => {
+  (streamsApi.createRoute as jest.Mock).mockRejectedValue({
+    response: { status: 400, data: { error: 'listener port TCP/6379 is not claimed by the stream' } },
+  });
   await renderCreate();
-  expect(screen.getByText(/Allowed range: 5000–7000/)).toBeInTheDocument();
-  await fillValid('9000');
+  await fillValid('6379');
   await submitFromPreview();
-  expect(await screen.findByText('Listener port must be between 5000 and 7000')).toBeInTheDocument();
-  expect(streamsApi.createRoute).not.toHaveBeenCalled();
+  expect(await screen.findByText(/not claimed by the stream/)).toBeInTheDocument();
+  expect(screen.getByLabelText('Listener Port')).toBeInTheDocument();
+  expect(screen.getByTestId('tab-error-basic')).toBeInTheDocument();
+  expect(push).not.toHaveBeenCalled();
 });
 
-test('falls back to the plain port check when the template fetch fails', async () => {
-  (domainTemplatesApi.get as jest.Mock).mockRejectedValueOnce(new Error('boom'));
-  (streamsApi.createRoute as jest.Mock).mockResolvedValue({ warnings: [] });
+test('another 400 stays a form-level error', async () => {
+  (streamsApi.createRoute as jest.Mock).mockRejectedValue({
+    response: { status: 400, data: { error: 'backend service not found' } },
+  });
   await renderCreate();
-  expect(screen.queryByText(/Allowed range/)).not.toBeInTheDocument();
-  await fillValid('9000');
+  await fillValid('6379');
   await submitFromPreview();
-  await waitFor(() => expect(streamsApi.createRoute).toHaveBeenCalled());
+  expect(await screen.findByText('backend service not found')).toBeInTheDocument();
+  expect(screen.queryByTestId('tab-error-basic')).not.toBeInTheDocument();
 });
 
 test('Preview renders the proposed route and BackendTrafficPolicy from the server', async () => {
@@ -226,7 +421,7 @@ test('a UDP route previews as UDPRoute', async () => {
   (streamsApi.previewCreateRoute as jest.Mock).mockResolvedValue({ proposedYaml: 'kind: UDPRoute' });
   await renderCreate();
   fireEvent.click(screen.getByRole('radio', { name: 'UDP' }));
-  await fillValid('6379');
+  await fillValid('5353');
   tab(/^Preview/);
   expect(await screen.findByRole('heading', { name: 'UDPRoute' })).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'BackendTrafficPolicy' })).not.toBeInTheDocument();
@@ -246,7 +441,7 @@ test('Preview shows a server 400/409 inline', async () => {
 test('Preview asks for a listener port instead of calling the server', async () => {
   await renderCreate();
   tab(/^Preview/);
-  expect(await screen.findByTestId('preview-error')).toHaveTextContent('Enter a listener port');
+  expect(await screen.findByTestId('preview-error')).toHaveTextContent('Select a listener port');
   expect(streamsApi.previewCreateRoute).not.toHaveBeenCalled();
 });
 
@@ -270,17 +465,25 @@ test('ignores a stale preview response after the form changed', async () => {
   expect(screen.getByText('port: 6380')).toBeInTheDocument();
 });
 
+test('edit keeps the route\'s own port selectable and selected', async () => {
+  render(<L4RouteForm projectId="p1" streamId="s1" routeId="r1" />);
+  expect(await screen.findByLabelText('Name')).toHaveValue('db');
+  expect(optionLabels()).toEqual(['Select...', '5432/TCP', '6379/TCP', '6380/TCP']);
+  expect(screen.getByLabelText('Listener Port')).toHaveValue('5432');
+  expect(screen.getByRole('radio', { name: 'TCP' })).toBeDisabled();
+});
+
 test('edit previews the update diff and returns to the route detail page', async () => {
   (streamsApi.updateRoute as jest.Mock).mockResolvedValue({ id: 'r1' });
   render(<L4RouteForm projectId="p1" streamId="s1" routeId="r1" />);
   expect(await screen.findByLabelText('Name')).toHaveValue('db');
   expect(screen.getByRole('link', { name: /Back to Route/ })).toHaveAttribute('href', '/projects/p1/streams/s1/routes/r1');
-  fireEvent.change(screen.getByLabelText('Listener Port'), { target: { value: '5433' } });
+  fireEvent.change(screen.getByLabelText('Listener Port'), { target: { value: '6380' } });
   tab(/^Preview/);
   expect(await screen.findByText('port: 5433')).toBeInTheDocument();
   expect(screen.getByText('port: 5432')).toBeInTheDocument();
   expect(streamsApi.previewUpdateRoute).toHaveBeenCalledWith(
-    'p1', 's1', 'r1', expect.objectContaining({ config: expect.objectContaining({ listenerPort: 5433 }) })
+    'p1', 's1', 'r1', expect.objectContaining({ config: expect.objectContaining({ listenerPort: 6380 }) })
   );
   fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
   await waitFor(() => expect(push).toHaveBeenCalledWith('/projects/p1/streams/s1/routes/r1'));

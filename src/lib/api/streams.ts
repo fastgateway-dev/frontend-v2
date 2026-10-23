@@ -102,7 +102,7 @@ export const streamsApi = {
     const response = await apiClient.get<L4Metrics>(`/projects/${projectId}/streams/${streamId}/metrics`);
     return response.data;
   },
-  // Entry point: mode, address, who shares it, and the port map (ports + reserved).
+  // Entry point: mode, address, and the port map (claimed ports + reserved).
   getEntrypoint: async (projectId: string, streamId: string): Promise<StreamEntrypoint> => {
     const response = await apiClient.get<StreamEntrypoint>(`/projects/${projectId}/streams/${streamId}/entrypoint`);
     return response.data;

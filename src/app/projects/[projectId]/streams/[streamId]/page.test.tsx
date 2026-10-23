@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import StreamDetailPage from './page';
 
 jest.mock('next/navigation', () => ({
@@ -10,7 +10,9 @@ jest.mock('@/lib/api', () => ({
     get: jest.fn().mockResolvedValue({
       id: 's1', projectId: 'p1', name: 'pg', namespace: 'ns', status: 'active',
       k8sGatewayName: 'gw', k8sGatewayClass: 'gc',
+      ports: [{ transport: 'TCP', port: 5432 }],
     }),
+    update: jest.fn(),
     listRoutes: jest.fn().mockResolvedValue({
       data: [
         { id: 'r1', name: 'db', protocol: 'tcp', status: 'active', config: { listenerPort: 5432 }, team: { id: 't1', name: 'Team A' } },
@@ -48,7 +50,7 @@ test('Routes tab links each route to its detail page, shows the owner team and k
   const link = await screen.findByRole('link', { name: 'db' });
   expect(link).toHaveAttribute('href', '/projects/p1/streams/s1/routes/r1');
   expect(screen.getByText('Team A')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
   await waitFor(() => expect(streamsApi.deployRoute).toHaveBeenCalledWith('p1', 's1', 'r2'));
   await waitFor(() => expect(streamsApi.getEntrypoint).toHaveBeenCalledTimes(2));
@@ -75,4 +77,66 @@ test('surfaces the 409 remove-routes-first error on delete', async () => {
   const buttons = await screen.findAllByRole('button', { name: 'Delete' });
   fireEvent.click(buttons[buttons.length - 1]);
   await waitFor(() => expect(screen.getByText(/remove them first/i)).toBeInTheDocument());
+});
+
+test('Edit ports is offered only to users who can manage domains', async () => {
+  const { permissionsApi } = jest.requireMock('@/lib/api');
+  render(<StreamDetailPage />);
+  expect(await screen.findByRole('button', { name: 'Edit ports' })).toBeInTheDocument();
+  cleanup();
+  permissionsApi.getProjectPermissions.mockResolvedValueOnce({ canManageDomains: false, canCreateRoutes: true });
+  render(<StreamDetailPage />);
+  await screen.findByRole('link', { name: 'db' });
+  expect(screen.queryByRole('button', { name: 'Edit ports' })).not.toBeInTheDocument();
+});
+
+test('saving ports refreshes the entry point panel and the Manifests tab', async () => {
+  (streamsApi.update as jest.Mock).mockResolvedValue({
+    id: 's1', projectId: 'p1', name: 'pg', namespace: 'ns', status: 'active',
+    ports: [{ transport: 'TCP', port: 5432 }, { transport: 'TCP', port: 6000 }],
+  });
+  render(<StreamDetailPage />);
+  fireEvent.click(await screen.findByRole('tab', { name: 'Manifests' }));
+  await screen.findByText('kind: Gateway');
+  expect(streamsApi.getYamls).toHaveBeenCalledTimes(1);
+  expect(streamsApi.getEntrypoint).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit ports' }));
+  fireEvent.change(screen.getByLabelText('Port'), { target: { value: '6000' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() =>
+    expect(streamsApi.update).toHaveBeenCalledWith('p1', 's1', {
+      ports: [{ transport: 'TCP', port: 5432 }, { transport: 'TCP', port: 6000 }],
+    })
+  );
+  await waitFor(() => expect(streamsApi.getEntrypoint).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(streamsApi.getYamls).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+});
+
+test('Edit ports still works when the entry point fails to load', async () => {
+  (streamsApi.getEntrypoint as jest.Mock).mockRejectedValue({ response: { status: 500, data: { error: 'template lookup failed' } } });
+  (streamsApi.update as jest.Mock).mockResolvedValue({
+    id: 's1', projectId: 'p1', name: 'pg', namespace: 'ns', status: 'active',
+    ports: [{ transport: 'TCP', port: 5432 }, { transport: 'UDP', port: 53 }],
+  });
+  render(<StreamDetailPage />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('template lookup failed');
+  const button = screen.getByRole('button', { name: 'Edit ports' });
+  expect(button).toBeEnabled();
+  fireEvent.click(button);
+  // Seeded from stream.ports even though there is no entry point to lock or validate against.
+  expect(screen.getAllByTestId('port-claim-chip')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Remove 5432/TCP' })).toBeEnabled();
+  fireEvent.click(screen.getByLabelText('UDP'));
+  fireEvent.change(screen.getByLabelText('Port'), { target: { value: '53' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() =>
+    expect(streamsApi.update).toHaveBeenCalledWith('p1', 's1', {
+      ports: [{ transport: 'UDP', port: 53 }, { transport: 'TCP', port: 5432 }],
+    })
+  );
 });
